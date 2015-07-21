@@ -76,8 +76,8 @@ static char *rover;           /* Next fit rover */
 
 /* Given block ptr bp, compute address of its successor or predecessor
    field which stores the offset of adjacent block in the explicit free list*/
-#define SUCCP(bp) ((char *)(bp) + WSIZE)
-#define PREDP(bp) ((char *)(bp) + DSIZE)
+#define SUCCP(bp) ((char *)(bp))
+#define PREDP(bp) ((char *)(bp) + WSIZE)
 
 /* Given block ptr bp, compute the block ptr of its successor or predecessor
    in the explicit free list */
@@ -86,7 +86,7 @@ static char *rover;           /* Next fit rover */
 
 /* compute the relative offset from a block pointer to first block of heap
    which saves space than storing a real pointer in the block */
-#define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0))
+#define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0)) // heap_listp is 0x800000008 after first moving
 
 /* See if the previous block is allocated to eliminate unneccesary footer fields*/
 #define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
@@ -114,24 +114,31 @@ int mm_init(void) {
     if ((heap_listp = mem_sbrk(8*WSIZE)) == (void *)-1) //line:vm:mm:begininit
         return -1;
     PUT(heap_listp, 0);                          /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue header */ 
-    PUT(heap_listp + (2*WSIZE), heap_listp + (6*WSIZE)); /* SUCC field of root */
+    PUT(heap_listp + (1*WSIZE), NEW_PACK(2*DSIZE, 1, 1)); /* Prologue header */ 
+    PUT(heap_listp + (2*WSIZE), 4 *WSIZE); /* SUCC field of root */
     PUT(heap_listp + (3*WSIZE), 0); /* PRED field of root */
-    PUT(heap_listp + (4*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue footer */ 
+    PUT(heap_listp + (4*WSIZE), NEW_PACK(2*DSIZE, 1, 1)); /* Prologue footer */ 
     PUT(heap_listp + (5*WSIZE), NEW_PACK(0, 1, 1));     /* Epilogue header */
     PUT(heap_listp + (6*WSIZE), 0); /* SUCC field of tail */
-    PUT(heap_listp + (7*WSIZE), heap_listp + (2*WSIZE)); /* PRED field of tail */
-    heap_listp += (2*WSIZE);                     //line:vm:mm:endinit  
+    PUT(heap_listp + (7*WSIZE), 0); /* PRED field of tail */
 
+    int i = 0;
+    for (i = 0; i < 8; i ++) {
+        unsigned int *p = (unsigned int *)(heap_listp + i * WSIZE);
+        printf("block %d, addr: %p, 0x%x\n", i, p, *p);
+    }
     root = heap_listp + (2*WSIZE);
     tail = heap_listp + (6*WSIZE);
+    heap_listp += (2*WSIZE);                     //line:vm:mm:endinit
+    // check_list(__LINE__, 1);
+    printf("root: %p, pred: %x, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
+    printf("tail: %p, pred: %p, succ: %x\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL){ 
         return -1;
     }
     checkheap(__LINE__, 0);
     dbg_printf("END INIT\n");
-    printf("root: %p\n", root);
     return 0;
 }
 
@@ -140,7 +147,6 @@ int mm_init(void) {
  */
 void *malloc (size_t size) {
     dbg_printf("MALLOC\n");
-    // printf("root: %p\n", root);
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     size_t tmp;
@@ -153,7 +159,6 @@ void *malloc (size_t size) {
     if (size == 0){
         checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (size == 0)\n");
-        printf("root: %p\n", root);
         return NULL;
     }
 
@@ -172,7 +177,6 @@ void *malloc (size_t size) {
         place(bp, asize);                  //line:vm:mm:findfitplace
         checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (find_fit succeed)\n");
-        printf("root: %p\n", root);
         return bp;
     }
 
@@ -181,13 +185,11 @@ void *malloc (size_t size) {
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL) { 
         checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (extend_heap Fails)\n");
-        printf("root: %p\n", root);
         return NULL;                                  //line:vm:mm:growheap2
     }
     place(bp, asize);                                 //line:vm:mm:growheap3
     checkheap(__LINE__, 0);
     dbg_printf("END MALLOC (extend_heap)\n");
-    printf("root: %p\n", root);
     return bp;
 }
 
@@ -214,7 +216,6 @@ void free (void *bp) {
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
     coalesce(bp);
     dbg_printf("END FREE\n");
-    printf("root: %p\n", root);
 }
 
 /*
@@ -336,7 +337,6 @@ static void *coalesce(void *bp)
 
     checkheap(__LINE__, 0);
     dbg_printf("END COALESCE\n");
-    printf("root: %p\n", root);
     return bp;
 }
 
@@ -364,23 +364,26 @@ static void *extend_heap(size_t words)
 
     /* Initialize free block header/footer and the epilogue header */
     bp = bp - DSIZE; // move bp to the place right after previous epilogue header
-    char *pred_block_in_list = PRED_FREE_BLKP(tail);
+    void *pred_block_in_list = PRED_FREE_BLKP(tail);
 
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
+    
     char *epi = NEXT_BLKP(bp);
-
     PUT(HDRP(epi), NEW_PACK(0, 1, 0)); /* New epilogue header */
     PUT(PREDP(epi), HEAP_OFFSET(pred_block_in_list));
+    // printf("bang!!!\n");
+    // printf("root: %p, pred_block_in_list: %p\n", root, pred_block_in_list);
     PUT(SUCCP(pred_block_in_list), HEAP_OFFSET(epi));
+    // printf("bang!!!\n");
     PUT(SUCCP(epi), 0);
+    // printf("bang!!!\n");
     tail = epi;
 
     /* Coalesce if the previous block was free */
     void *rt = coalesce(bp);
     printf("END EXTEND_HEAP\n");
-    printf("root: %p\n", root);
     return rt;                                          //line:vm:mm:returnblock
 }
 
@@ -462,7 +465,7 @@ static void printblock(void *bp)
         printf("%p: header: [%ld:%d:%d] footer: [%ld:%d:%d] PRED: %x, SUCC: %x\n",
             bp,
             hsize, halloc, hprevalloc, fsize, falloc, fprevalloc,
-            GET(PREDP(bp)), GET(SUCCP(bp)));
+            GET(PREDP(bp)) + 0x8, GET(SUCCP(bp)) + 0x8);
     }
 }
 
@@ -472,6 +475,7 @@ static void printblock(void *bp)
 void mm_checkheap(int lineno) {
     checkheap(lineno, 1);
 }
+
 void checkheap(int lineno, int verbose) {
     verbose = 1;
     if (verbose){
@@ -481,11 +485,12 @@ void checkheap(int lineno, int verbose) {
             printf("********My Call*********\n");
         }
     }
+
     char *bp = heap_listp;
     /* check prologue block */
     if (verbose)
         printf("Heap (%p):\n", heap_listp);
-    if ((GET_SIZE(HDRP(heap_listp)) != DSIZE) || !GET_ALLOC(HDRP(heap_listp)))
+    if ((GET_SIZE(HDRP(heap_listp)) != 4*WSIZE) || !GET_ALLOC(HDRP(heap_listp)))
         printf("(%d) Bad prologue header\n", lineno);
     checkblock(heap_listp, lineno);
 
@@ -517,6 +522,7 @@ void checkheap(int lineno, int verbose) {
         printf("(%d) free blocks: %ld, free blocks in list: %ld\n", lineno, free_blocks, free_blocks_in_list);
     }
 }
+
 /* for all blocks except for epilogue block */
 static void checkblock(void *bp, int lineno) 
 {
@@ -525,7 +531,7 @@ static void checkblock(void *bp, int lineno)
         printf("(%d) Error: %p is not doubleword aligned\n", lineno, bp);
     // if (GET(HDRP(bp)) != GET(FTRP(bp)))
         // printf("Error: header does not match footer\n");
-    if ((bp != heap_listp) && (GET_SIZE(HDRP(bp)) < 2 * DSIZE)) {
+    if (GET_SIZE(HDRP(bp)) < 4 * WSIZE) {
         printf("(%d) Error: %p block size is smaller than minimum size\n", lineno, bp);
     }
     if (!GET_ALLOC(HDRP(bp))) {
@@ -538,18 +544,14 @@ static void checkblock(void *bp, int lineno)
 
 static size_t check_list(int lineno, int verbose) {
     if (verbose) {
-        printf("(%d) BEGIN check list:\n", lineno);
+        printf("(%d) Explicit list:\n", lineno);
+        printf("root: %p, pred: %p, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
     }
     size_t free_blocks_in_list = 0;
     // printf("(%d) %d\n", lineno, free_blocks_in_list);
-    void *ptr = root;
-    if (ptr == NULL) {
-        if (verbose) {
-            printf("(%d) END check list\n", lineno);
-        }
-        return 0;
-    }
-    while (1) {
+    void *ptr = SUCC_FREE_BLKP(root);
+    // printf("root: %p, tail: %p, ptr: %p\n", root, tail, ptr);
+    while (ptr != tail) {
         free_blocks_in_list ++;
         if (verbose) {
             printblock(ptr);
@@ -558,22 +560,19 @@ static size_t check_list(int lineno, int verbose) {
         if (!in_heap(ptr)) {
             printf("(%d) %p out of heap\n", lineno, ptr);
         }
-        if (GET(PREDP(ptr))) {
-            if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
-                printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
-            }
+
+        if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
+            printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
         }
-        if (GET(SUCCP(ptr))) {
-            if (PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
-                printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
-            }
-            ptr = SUCC_FREE_BLKP(ptr);
-        } else {
-            break;
+        if (PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
+            printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
         }
+        ptr = SUCC_FREE_BLKP(ptr);
     }
+
     // printf("(%d) %d\n", lineno, free_blocks_in_list);
     if (verbose) {
+        printf("tail: %p, pred: %p, succ: %p\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
         printf("(%d) END check list\n", lineno);
     }
     return free_blocks_in_list;
