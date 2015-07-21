@@ -236,44 +236,61 @@ void mm_checkheap(int lineno) {
 
 static void *coalesce(void *bp) 
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    size_t size = GET_SIZE(HDRP(bp));
+    unsigned int size = GET_SIZE(HDRP(bp));
+    if (prev_alloc && next_alloc) { // Case 1
+        PUT(PREDP(root), HEAP_OFFSET(bp));
+        PUT(SUCCP(bp), HEAP_OFFSET(root));
+        PUT(PREDP(bp), 0);
+        root = bp;
 
-    if (prev_alloc && next_alloc) {            /* Case 1 */
-        return bp;
+    } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
+        void *prev_bp = PREV_BLKP(bp);
+        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+
+        size += GET_SIZE(HDRP(prev_bp));
+        PUT(HDRP(prev_bp), NEW_PACK(size, including the prev_alloc_bit, should be alloced));
+        PUT(FTRP(prev_bp), NEW_PACK(xxx)); // in fact, no need to store prev_alloc_bit in FTR
+        bp = prev_bp;
+
+        // the following part is the same as Case 1
+        // should reuse the code
+        PUT(PREDP(root), HEAP_OFFSET(bp));
+        PUT(SUCCP(bp), HEAP_OFFSET(root));
+        PUT(PREDP(bp), 0);
+        root = bp;
+    } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
+        void *next_bp = NEXT_BLKP(bp);
+        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
+
+        size += GET_SIZE(HDRP(next_bp));
+        PUT(HDRP(bp), NEW_PACK());
+        PUT(FTRP(bp), NEW_PACK());
+
+        PUT(PREDP(root), HEAP_OFFSET(bp));
+        PUT(SUCCP(bp), HEAP_OFFSET(root));
+        PUT(PREDP(bp), 0);
+        root = bp;
+    } else { // Case 4 before free, after free
+        void *prev_bp = PREV_BLKP(bp);
+        void *next_bp = NEXT_BLKP(bp);
+        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
+
+        size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
+        bp = prev_bp;
+        PUT(HDRP(bp), NEW_PACK());
+        PUT(FTRP(bp), NEW_PACK());
+
+        PUT(PREDP(root), HEAP_OFFSET(bp));
+        PUT(SUCCP(bp), HEAP_OFFSET(root));
+        PUT(PREDP(bp), 0);
     }
-
-    else if (prev_alloc && !next_alloc) {      /* Case 2 */
-        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size,0));
-    }
-
-    else if (!prev_alloc && next_alloc) {      /* Case 3 */
-        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(FTRP(bp), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        bp = PREV_BLKP(bp);
-    }
-
-    else {                                     /* Case 4 */
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
-            GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
-        bp = PREV_BLKP(bp);
-    }
-    /* $end mmfree */
-#ifdef NEXT_FIT
-    /* Make sure the rover isn't pointing into the free block */
-    /* that we just coalesced */
-
-    // WHY ???
-    if ((rover > (char *)bp) && (rover < NEXT_BLKP(bp))) 
-        rover = bp;
-#endif
-    /* $begin mmfree */
     return bp;
 }
 
