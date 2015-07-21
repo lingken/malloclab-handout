@@ -298,12 +298,20 @@ static void *coalesce(void *bp)
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
         dbg_printf("case 2\n");
         void *prev_bp = PREV_BLKP(bp);
+        dbg_printf("bang!!\n");
+        printblock(bp);
+        printblock(prev_bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        dbg_printf("bang!!\n");
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         
+        dbg_printf("bang!!\n");
         size += GET_SIZE(HDRP(prev_bp));
+        dbg_printf("bang!!\n");
         PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
+        dbg_printf("bang!!\n");
         PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
+        dbg_printf("bang!!\n");
         bp = prev_bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         dbg_printf("case 3\n");
@@ -365,6 +373,7 @@ static void *extend_heap(size_t words)
     void *pred_block_in_list = PRED_FREE_BLKP(tail);
 
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
+
     PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
     
@@ -411,6 +420,15 @@ static void place(void *bp, size_t asize)
         // The block is used, no need to save a footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
+
+        bp = NEXT_BLKP(bp);
+        unsigned int block_size = GET_SIZE(HDRP(bp));
+        unsigned int block_alloced = GET_ALLOC(HDRP(bp));
+        PUT(HDRP(bp), NEW_PACK(block_size, block_alloced, 1));
+        if (block_size) {
+            // not epilogue
+            PUT(FTRP(bp), NEW_PACK(block_size, block_alloced, 1));
+        }
     }
 }
 /* $end mmplace */
@@ -447,7 +465,7 @@ static void printblock(void *bp)
     fprevalloc = GET_PREV_ALLOC(FTRP(bp));
 
     if (hsize == 0) {
-        printf("%p: EOL\n", bp);
+        printf("%p: EOL   :[%ld:%d:%d]\n", bp, hsize, halloc, hprevalloc);
         return;
     }
  
@@ -469,7 +487,7 @@ void mm_checkheap(int lineno) {
 }
 
 void checkheap(int lineno, int verbose) {
-    verbose = 1;
+    // verbose = 1;
     if (verbose){
         if (lineno == 1) {
             printf("============================================\n");
