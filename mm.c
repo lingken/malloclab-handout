@@ -385,42 +385,28 @@ static void place(void *bp, size_t asize)
 /* 
  * find_fit - Find a fit for a block with asize bytes 
  */
-/* $begin mmfirstfit */
-/* $begin mmfirstfit-proto */
+
 static void *find_fit(size_t asize)
-/* $end mmfirstfit-proto */
 {
-    /* $end mmfirstfit */
-
-#ifdef NEXT_FIT 
-    /* Next fit search */
-    char *oldrover = rover;
-
-    /* Search from the rover to the end of list */
-    for ( ; GET_SIZE(HDRP(rover)) > 0; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-
-    /* search from start of list to old rover */
-    for (rover = heap_listp; rover < oldrover; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-
-    return NULL;  /* no fit found */
-#else 
-    /* $begin mmfirstfit */
+    if (root == NULL) {
+        return NULL;
+    }
     /* First-fit search */
-    void *bp;
+    void *bp = root;
 
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+    while (true) {
+        if (GET_SIZE(HDRP(bp)) >= asize) {
             return bp;
+        }
+        if (GET(SUCCP(bp))) {
+            bp = SUCC_FREE_BLKP(bp);
+        } else {
+            break;
         }
     }
     return NULL; /* No fit */
-#endif
+
 }
-/* $end mmfirstfit */
 
 static void printblock(void *bp) 
 {
