@@ -106,6 +106,7 @@ static size_t check_list(int lineno, int verbose);
  * Initialize: return -1 on error, 0 on success.
  */
 int mm_init(void) {
+    dbg_printf("INIT\n");
     /* Create the initial empty heap */
     root = NULL;
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) //line:vm:mm:begininit
@@ -121,6 +122,8 @@ int mm_init(void) {
         return -1;
     }
     checkheap(__LINE__, 0);
+    dbg_printf("END INIT\n");
+    printf("root: %p\n", root);
     return 0;
 }
 
@@ -128,6 +131,8 @@ int mm_init(void) {
  * malloc
  */
 void *malloc (size_t size) {
+    dbg_printf("MALLOC\n");
+    // printf("root: %p\n", root);
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     size_t tmp;
@@ -136,10 +141,13 @@ void *malloc (size_t size) {
     if (heap_listp == 0){
         mm_init();
     }
-
     /* Ignore spurious requests */
-    if (size == 0)
+    if (size == 0){
+        checkheap(__LINE__, 0);
+        dbg_printf("END MALLOC (size == 0)\n");
+        printf("root: %p\n", root);
         return NULL;
+    }
 
     /* Adjust block size to include overhead and alignment reqs. */
     if (size <= DSIZE){                                          //line:vm:mm:sizeadjust1
@@ -154,15 +162,24 @@ void *malloc (size_t size) {
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {  //line:vm:mm:findfitcall
         place(bp, asize);                  //line:vm:mm:findfitplace
+        checkheap(__LINE__, 0);
+        dbg_printf("END MALLOC (find_fit succeed)\n");
+        printf("root: %p\n", root);
         return bp;
     }
 
     /* No fit found. Get more memory and place the block */
     extendsize = MAX(asize,CHUNKSIZE);                 //line:vm:mm:growheap1
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)  
+    if ((bp = extend_heap(extendsize/WSIZE)) == NULL) { 
+        checkheap(__LINE__, 0);
+        dbg_printf("END MALLOC (extend_heap Fails)\n");
+        printf("root: %p\n", root);
         return NULL;                                  //line:vm:mm:growheap2
+    }
     place(bp, asize);                                 //line:vm:mm:growheap3
     checkheap(__LINE__, 0);
+    dbg_printf("END MALLOC (extend_heap)\n");
+    printf("root: %p\n", root);
     return bp;
 }
 
@@ -170,6 +187,7 @@ void *malloc (size_t size) {
  * free
  */
 void free (void *bp) {
+    dbg_printf("FREE\n");
     /* $end mmfree */
     if (bp == 0) 
         return;
@@ -187,6 +205,8 @@ void free (void *bp) {
     PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc));
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
     coalesce(bp);
+    dbg_printf("END FREE\n");
+    printf("root: %p\n", root);
 }
 
 /*
@@ -261,7 +281,7 @@ static int aligned(const void *p) {
 
 static void *coalesce(void *bp) 
 {
-    checkheap(__LINE__, 0);
+    dbg_printf("COALESCE\n");
     size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     unsigned int size = GET_SIZE(HDRP(bp));
@@ -279,20 +299,24 @@ static void *coalesce(void *bp)
 
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
         printf("case 2\n");
+        checkheap(__LINE__, 1);
         void *prev_bp = PREV_BLKP(bp);
+        printf("bang! prev_bp: %p\n", prev_bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        printf("bang!\n");
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
-
+        printf("bang!\n");
         size += GET_SIZE(HDRP(prev_bp));
         PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
         PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
         bp = prev_bp;
-
+        printf("bang!\n");
         // the following part is the same as Case 1
         // should reuse the code
         PUT(PREDP(root), HEAP_OFFSET(bp));
         PUT(SUCCP(bp), HEAP_OFFSET(root));
         PUT(PREDP(bp), 0);
+        printf("bang!\n");
         root = bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         printf("case 3\n");
@@ -326,7 +350,9 @@ static void *coalesce(void *bp)
         PUT(SUCCP(bp), HEAP_OFFSET(root));
         PUT(PREDP(bp), 0);
     }
-    checkheap(__LINE__, 1);
+    checkheap(__LINE__, 0);
+    dbg_printf("END COALESCE\n");
+    printf("root: %p\n", root);
     return bp;
 }
 
@@ -339,6 +365,7 @@ static void *coalesce(void *bp)
  */
 static void *extend_heap(size_t words) 
 {
+    dbg_printf("EXTEND_HEAP\n");
     // the minimum size of a block is 16 bytes (HDR, SUCC, PRED, FTR)
     if (words < 4) {
         words = 4;
@@ -357,7 +384,10 @@ static void *extend_heap(size_t words)
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
     PUT(HDRP(NEXT_BLKP(bp)), NEW_PACK(0, 1, 0)); /* New epilogue header */
     /* Coalesce if the previous block was free */
-    return coalesce(bp);                                          //line:vm:mm:returnblock
+    void *rt = coalesce(bp);
+    printf("END EXTEND_HEAP\n");
+    printf("root: %p\n", root);
+    return rt;                                          //line:vm:mm:returnblock
 }
 
 /* 
@@ -371,8 +401,8 @@ static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));   
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
-
-    if ((csize - asize) >= (2*DSIZE)) { 
+    if ((csize - asize) >= (2*DSIZE)) {
+        // dbg_printf("Case: (csize - asize) >= (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
         // The block is used, no need to save a footer
         // PUT(FTRP(bp), PACK(asize, 1));
@@ -390,6 +420,7 @@ static void place(void *bp, size_t asize)
         coalesce(bp);
     }
     else {
+        // dbg_printf("Case: (csize - asize) < (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
         // The block is used, no need to save a footer
         // PUT(FTRP(bp), PACK(csize, 1));
@@ -435,7 +466,6 @@ static void printblock(void *bp)
 {
     size_t hsize, halloc, hprevalloc, fsize, falloc, fprevalloc;
 
-    // checkheap(0);
     hsize = GET_SIZE(HDRP(bp));
     halloc = GET_ALLOC(HDRP(bp));
     hprevalloc = GET_PREV_ALLOC(HDRP(bp));  
@@ -468,8 +498,14 @@ void mm_checkheap(int lineno) {
     checkheap(lineno, 1);
 }
 void checkheap(int lineno, int verbose) {
-    if (verbose)
-        printf("**************************************\n");
+    verbose = 1;
+    if (verbose){
+        if (lineno == 1) {
+            printf("============================================\n");
+        } else {
+            printf("********My Call*********\n");
+        }
+    }
     char *bp = heap_listp;
     /* check prologue block */
     if (verbose)
@@ -530,9 +566,12 @@ static size_t check_list(int lineno, int verbose) {
         printf("(%d) BEGIN check list:\n", lineno);
     }
     size_t free_blocks_in_list = 0;
-    printf("(%d) %d\n", lineno, free_blocks_in_list);
+    // printf("(%d) %d\n", lineno, free_blocks_in_list);
     void *ptr = root;
     if (ptr == NULL) {
+        if (verbose) {
+            printf("(%d) END check list\n", lineno);
+        }
         return 0;
     }
     while (1) {
@@ -541,14 +580,14 @@ static size_t check_list(int lineno, int verbose) {
             printblock(ptr);
         }
 
-        // if (!in_heap(ptr)) {
-        //     printf("(%d) %p out of heap\n", lineno, ptr);
-        // }
-        // if (GET(PREDP(ptr))) {
-        //     if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
-        //         printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
-        //     }
-        // }
+        if (!in_heap(ptr)) {
+            printf("(%d) %p out of heap\n", lineno, ptr);
+        }
+        if (GET(PREDP(ptr))) {
+            if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
+                printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
+            }
+        }
         if (GET(SUCCP(ptr))) {
             if (PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
                 printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
@@ -558,7 +597,7 @@ static size_t check_list(int lineno, int verbose) {
             break;
         }
     }
-    printf("(%d) %d\n", lineno, free_blocks_in_list);
+    // printf("(%d) %d\n", lineno, free_blocks_in_list);
     if (verbose) {
         printf("(%d) END check list\n", lineno);
     }
