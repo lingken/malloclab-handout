@@ -15,11 +15,14 @@
 
 /* If you want debugging output, use the following macro.  When you hand
  * in, remove the #define DEBUG line. */
-#define DEBUG
+
+// #define DEBUG
 #ifdef DEBUG
 # define dbg_printf(...) printf(__VA_ARGS__)
+# define dbg_checkheap(...) checkheap(__VA_ARGS__)
 #else
 # define dbg_printf(...)
+# define dbg_checkheap(...)
 #endif
 
 
@@ -122,22 +125,17 @@ int mm_init(void) {
     PUT(heap_listp + (6*WSIZE), 0); /* SUCC field of tail */
     PUT(heap_listp + (7*WSIZE), 0); /* PRED field of tail */
 
-    int i = 0;
-    for (i = 0; i < 8; i ++) {
-        unsigned int *p = (unsigned int *)(heap_listp + i * WSIZE);
-        printf("block %d, addr: %p, 0x%x\n", i, p, *p);
-    }
     root = heap_listp + (2*WSIZE);
     tail = heap_listp + (6*WSIZE);
     heap_listp += (2*WSIZE);                     //line:vm:mm:endinit
     // check_list(__LINE__, 1);
-    printf("root: %p, pred: %x, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
-    printf("tail: %p, pred: %p, succ: %x\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
+    dbg_printf("root: %p, pred: %x, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
+    dbg_printf("tail: %p, pred: %p, succ: %x\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL){ 
         return -1;
     }
-    checkheap(__LINE__, 0);
+    dbg_checkheap(__LINE__, 0);
     dbg_printf("END INIT\n");
     return 0;
 }
@@ -157,7 +155,7 @@ void *malloc (size_t size) {
     }
     /* Ignore spurious requests */
     if (size == 0){
-        checkheap(__LINE__, 0);
+        dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (size == 0)\n");
         return NULL;
     }
@@ -175,7 +173,7 @@ void *malloc (size_t size) {
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {  //line:vm:mm:findfitcall
         place(bp, asize);                  //line:vm:mm:findfitplace
-        checkheap(__LINE__, 0);
+        dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (find_fit succeed)\n");
         return bp;
     }
@@ -183,12 +181,12 @@ void *malloc (size_t size) {
     /* No fit found. Get more memory and place the block */
     extendsize = MAX(asize,CHUNKSIZE);                 //line:vm:mm:growheap1
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL) { 
-        checkheap(__LINE__, 0);
+        dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (extend_heap Fails)\n");
         return NULL;                                  //line:vm:mm:growheap2
     }
     place(bp, asize);                                 //line:vm:mm:growheap3
-    checkheap(__LINE__, 0);
+    dbg_checkheap(__LINE__, 0);
     dbg_printf("END MALLOC (extend_heap)\n");
     return bp;
 }
@@ -296,9 +294,9 @@ static void *coalesce(void *bp)
     unsigned int size = GET_SIZE(HDRP(bp));
     
     if (prev_alloc && next_alloc) { // Case 1
-        printf("case 1\n");
+        dbg_printf("case 1\n");
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
-        printf("case 2\n");
+        dbg_printf("case 2\n");
         void *prev_bp = PREV_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
@@ -308,7 +306,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
         bp = prev_bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
-        printf("case 3\n");
+        dbg_printf("case 3\n");
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
@@ -317,7 +315,7 @@ static void *coalesce(void *bp)
         PUT(HDRP(bp), NEW_PACK(size, 0, 1));
         PUT(FTRP(bp), NEW_PACK(size, 0, 1));
     } else { // Case 4 before free, after free
-        printf("case 4\n");
+        dbg_printf("case 4\n");
         void *prev_bp = PREV_BLKP(bp);
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
@@ -335,7 +333,7 @@ static void *coalesce(void *bp)
     PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(bp));
     PUT(SUCCP(root), HEAP_OFFSET(bp));
 
-    checkheap(__LINE__, 0);
+    dbg_checkheap(__LINE__, 0);
     dbg_printf("END COALESCE\n");
     return bp;
 }
@@ -373,17 +371,14 @@ static void *extend_heap(size_t words)
     char *epi = NEXT_BLKP(bp);
     PUT(HDRP(epi), NEW_PACK(0, 1, 0)); /* New epilogue header */
     PUT(PREDP(epi), HEAP_OFFSET(pred_block_in_list));
-    // printf("bang!!!\n");
-    // printf("root: %p, pred_block_in_list: %p\n", root, pred_block_in_list);
+
     PUT(SUCCP(pred_block_in_list), HEAP_OFFSET(epi));
-    // printf("bang!!!\n");
     PUT(SUCCP(epi), 0);
-    // printf("bang!!!\n");
     tail = epi;
 
     /* Coalesce if the previous block was free */
     void *rt = coalesce(bp);
-    printf("END EXTEND_HEAP\n");
+    dbg_printf("END EXTEND_HEAP\n");
     return rt;                                          //line:vm:mm:returnblock
 }
 
@@ -455,10 +450,7 @@ static void printblock(void *bp)
         printf("%p: EOL\n", bp);
         return;
     }
-
-    // printf("%p: header: [%ld:%c] footer: [%ld:%c]\n", bp, 
-    //        hsize, (halloc ? 'a' : 'f'), 
-    //        fsize, (falloc ? 'a' : 'f')); 
+ 
     if (halloc) {
         printf("%p: header: [%ld:%d:%d]\n", bp, hsize, halloc, hprevalloc);
     } else {
@@ -570,7 +562,6 @@ static size_t check_list(int lineno, int verbose) {
         ptr = SUCC_FREE_BLKP(ptr);
     }
 
-    // printf("(%d) %d\n", lineno, free_blocks_in_list);
     if (verbose) {
         printf("tail: %p, pred: %p, succ: %p\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
         printf("(%d) END check list\n", lineno);
