@@ -72,6 +72,25 @@ static char *heap_listp = 0;  /* Pointer to first block */
 static char *rover;           /* Next fit rover */
 #endif
 
+/* Given block ptr bp, compute address of its successor or predecessor
+   field which stores the offset of adjacent block in the explicit free list*/
+#define SUCCP(bp) ((char *)(bp) + WSIZE)
+#define PREDP(bp) ((char *)(bp) + DSIZE)
+
+/* Given block ptr bp, compute the block ptr of its successor or predecessor
+   in the explicit free list */
+#define SUCC_FREE_BLKP(bp) (heap_listp + GET(SUCCP(bp)))
+#define PRED_FREE_BLKP(bp) (heap_listp + GET(PREDP(bp)))
+
+/* compute the relative offset from a block pointer to first block of heap
+   which saves space than storing a real pointer in the block */
+HEAP_OFFSET(bp) ((char *)(bp) - heap_listp)
+
+/* See if the previous block is allocated to eliminate unneccesary footer fields*/
+#define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
+/* pack a size, allocated bit of current block and allocated bit of previous block into a word */
+#define NEW_PACK(size, alloc, prev_alloc) ((size) | (alloc) | (prev_alloc << 1))
+
 /* Function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
@@ -251,8 +270,8 @@ static void *coalesce(void *bp)
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
 
         size += GET_SIZE(HDRP(prev_bp));
-        PUT(HDRP(prev_bp), NEW_PACK(size, including the prev_alloc_bit, should be alloced));
-        PUT(FTRP(prev_bp), NEW_PACK(xxx)); // in fact, no need to store prev_alloc_bit in FTR
+        PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
+        PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
         bp = prev_bp;
 
         // the following part is the same as Case 1
@@ -267,8 +286,8 @@ static void *coalesce(void *bp)
         PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
 
         size += GET_SIZE(HDRP(next_bp));
-        PUT(HDRP(bp), NEW_PACK());
-        PUT(FTRP(bp), NEW_PACK());
+        PUT(HDRP(bp), NEW_PACK(size, 0, 1));
+        PUT(FTRP(bp), NEW_PACK(size, 0, 1));
 
         PUT(PREDP(root), HEAP_OFFSET(bp));
         PUT(SUCCP(bp), HEAP_OFFSET(root));
@@ -284,8 +303,8 @@ static void *coalesce(void *bp)
 
         size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
         bp = prev_bp;
-        PUT(HDRP(bp), NEW_PACK());
-        PUT(FTRP(bp), NEW_PACK());
+        PUT(HDRP(bp), NEW_PACK(size, 0, 1));
+        PUT(FTRP(bp), NEW_PACK(size, 0, 1));
 
         PUT(PREDP(root), HEAP_OFFSET(bp));
         PUT(SUCCP(bp), HEAP_OFFSET(root));
