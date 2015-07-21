@@ -68,7 +68,8 @@
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */ 
-static char *root = 0; 
+static char *root = 0;
+static char *tail = 0;
 #ifdef NEXT_FIT
 static char *rover;           /* Next fit rover */
 #endif
@@ -80,8 +81,8 @@ static char *rover;           /* Next fit rover */
 
 /* Given block ptr bp, compute the block ptr of its successor or predecessor
    in the explicit free list */
-#define SUCC_FREE_BLKP(bp)  ((GET(SUCCP(bp))) ? (heap_listp + GET(SUCCP(bp))) : (0))
-#define PRED_FREE_BLKP(bp)  ((GET(PREDP(bp))) ? (heap_listp + GET(PREDP(bp))) : (0))
+#define SUCC_FREE_BLKP(bp)  (heap_listp + GET(SUCCP(bp)))
+#define PRED_FREE_BLKP(bp)  (heap_listp + GET(PREDP(bp)))
 
 /* compute the relative offset from a block pointer to first block of heap
    which saves space than storing a real pointer in the block */
@@ -109,16 +110,23 @@ int mm_init(void) {
     dbg_printf("INIT\n");
     /* Create the initial empty heap */
     root = NULL;
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) //line:vm:mm:begininit
+    tail = NULL;
+    if ((heap_listp = mem_sbrk(8*WSIZE)) == (void *)-1) //line:vm:mm:begininit
         return -1;
     PUT(heap_listp, 0);                          /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue header */ 
-    PUT(heap_listp + (2*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue footer */ 
-    PUT(heap_listp + (3*WSIZE), NEW_PACK(0, 1, 1));     /* Epilogue header */
+    PUT(heap_listp + (2*WSIZE), heap_listp + (6*WSIZE)); /* SUCC field of root */
+    PUT(heap_listp + (3*WSIZE), 0); /* PRED field of root */
+    PUT(heap_listp + (4*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue footer */ 
+    PUT(heap_listp + (5*WSIZE), NEW_PACK(0, 1, 1));     /* Epilogue header */
+    PUT(heap_listp + (6*WSIZE), 0); /* SUCC field of tail */
+    PUT(heap_listp + (7*WSIZE), heap_listp + (2*WSIZE)); /* PRED field of tail */
     heap_listp += (2*WSIZE);                     //line:vm:mm:endinit  
 
+    root = heap_listp + (2*WSIZE);
+    tail = heap_listp + (6*WSIZE);
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if ((root = extend_heap(CHUNKSIZE/WSIZE)) == NULL){ 
+    if (extend_heap(CHUNKSIZE/WSIZE) == NULL){ 
         return -1;
     }
     checkheap(__LINE__, 0);
@@ -285,41 +293,19 @@ static void *coalesce(void *bp)
     size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     unsigned int size = GET_SIZE(HDRP(bp));
-    if (root == NULL) {
-        printf("case 0\n");
-        root = bp;
-        PUT(PREDP(bp), 0);
-        PUT(SUCCP(bp), 0);
-    } else if (prev_alloc && next_alloc) { // Case 1
+    
+    if (prev_alloc && next_alloc) { // Case 1
         printf("case 1\n");
-        PUT(PREDP(root), HEAP_OFFSET(bp));
-        PUT(SUCCP(bp), HEAP_OFFSET(root));
-        PUT(PREDP(bp), 0);
-        root = bp;
-
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
         printf("case 2\n");
-        checkheap(__LINE__, 1);
         void *prev_bp = PREV_BLKP(bp);
-        printf("bang! prev_bp: %p\n", prev_bp);
-        if (SUCCP(PRED_FREE_BLKP(prev_bp)) != NULL)
-            PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
-        printf("bang!\n");
-        if (PREDP(SUCC_FREE_BLKP(prev_bp)) != NULL)
-            PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
-        printf("bang!\n");
+        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+        
         size += GET_SIZE(HDRP(prev_bp));
         PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
         PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
         bp = prev_bp;
-        printf("bang!\n");
-        // the following part is the same as Case 1
-        // should reuse the code
-        PUT(PREDP(root), HEAP_OFFSET(bp));
-        PUT(SUCCP(bp), HEAP_OFFSET(root));
-        PUT(PREDP(bp), 0);
-        printf("bang!\n");
-        root = bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         printf("case 3\n");
         void *next_bp = NEXT_BLKP(bp);
@@ -329,11 +315,6 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(next_bp));
         PUT(HDRP(bp), NEW_PACK(size, 0, 1));
         PUT(FTRP(bp), NEW_PACK(size, 0, 1));
-
-        PUT(PREDP(root), HEAP_OFFSET(bp));
-        PUT(SUCCP(bp), HEAP_OFFSET(root));
-        PUT(PREDP(bp), 0);
-        root = bp;
     } else { // Case 4 before free, after free
         printf("case 4\n");
         void *prev_bp = PREV_BLKP(bp);
@@ -347,11 +328,12 @@ static void *coalesce(void *bp)
         bp = prev_bp;
         PUT(HDRP(bp), NEW_PACK(size, 0, 1));
         PUT(FTRP(bp), NEW_PACK(size, 0, 1));
-
-        PUT(PREDP(root), HEAP_OFFSET(bp));
-        PUT(SUCCP(bp), HEAP_OFFSET(root));
-        PUT(PREDP(bp), 0);
     }
+    PUT(SUCCP(bp), HEAP_OFFSET(SUCC_FREE_BLKP(root)));
+    PUT(PREDP(bp), HEAP_OFFSET(root));
+    PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(bp));
+    PUT(SUCCP(root), HEAP_OFFSET(bp));
+
     checkheap(__LINE__, 0);
     dbg_printf("END COALESCE\n");
     printf("root: %p\n", root);
@@ -381,10 +363,20 @@ static void *extend_heap(size_t words)
         return NULL;                                        //line:vm:mm:endextend
 
     /* Initialize free block header/footer and the epilogue header */
+    bp = bp - DSIZE; // move bp to the place right after previous epilogue header
+    char *pred_block_in_list = PRED_FREE_BLKP(tail);
+
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
-    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header */
+    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
-    PUT(HDRP(NEXT_BLKP(bp)), NEW_PACK(0, 1, 0)); /* New epilogue header */
+    char *epi = NEXT_BLKP(bp);
+
+    PUT(HDRP(epi), NEW_PACK(0, 1, 0)); /* New epilogue header */
+    PUT(PREDP(epi), HEAP_OFFSET(pred_block_in_list));
+    PUT(SUCCP(pred_block_in_list), HEAP_OFFSET(epi));
+    PUT(SUCCP(epi), 0);
+    tail = epi;
+
     /* Coalesce if the previous block was free */
     void *rt = coalesce(bp);
     printf("END EXTEND_HEAP\n");
@@ -407,15 +399,9 @@ static void place(void *bp, size_t asize)
         // dbg_printf("Case: (csize - asize) >= (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
         // The block is used, no need to save a footer
-        // PUT(FTRP(bp), PACK(asize, 1));
-        if (PRED_FREE_BLKP(bp) != NULL) {
-            PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
-        } else {
-            root = SUCC_FREE_BLKP(bp);
-        }
-        if (SUCC_FREE_BLKP(bp) != NULL) {
-            PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
-        }
+        PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
+
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), NEW_PACK(csize-asize, 0, 1));
         PUT(FTRP(bp), NEW_PACK(csize-asize, 0, 1));
@@ -425,15 +411,8 @@ static void place(void *bp, size_t asize)
         // dbg_printf("Case: (csize - asize) < (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
         // The block is used, no need to save a footer
-        // PUT(FTRP(bp), PACK(csize, 1));
-        if (PRED_FREE_BLKP(bp) != NULL) {
-            PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
-        } else {
-            root = SUCC_FREE_BLKP(bp);
-        }
-        if (SUCC_FREE_BLKP(bp) != NULL) {
-            PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
-        }
+        PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
     }
 }
 /* $end mmplace */
@@ -448,20 +427,14 @@ static void *find_fit(size_t asize)
         return NULL;
     }
     /* First-fit search */
-    void *bp = root;
-
-    while (1) {
+    void *bp = SUCC_FREE_BLKP(root);
+    while (bp != tail) {
         if (GET_SIZE(HDRP(bp)) >= asize) {
             return bp;
         }
-        if (GET(SUCCP(bp))) {
-            bp = SUCC_FREE_BLKP(bp);
-        } else {
-            break;
-        }
+        bp = SUCC_FREE_BLKP(bp);
     }
     return NULL; /* No fit */
-
 }
 
 static void printblock(void *bp) 
