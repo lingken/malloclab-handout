@@ -174,14 +174,14 @@ void free (void *bp) {
     size_t size = GET_SIZE(HDRP(bp));
     /* $end mmfree */
 
-    // WHY do this?
     if (heap_listp == 0){
         mm_init();
     }
     /* $begin mmfree */
 
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
+    unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
+    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc));
+    PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
     coalesce(bp);
 }
 
@@ -331,6 +331,10 @@ static void *coalesce(void *bp)
 /* $begin mmextendheap */
 static void *extend_heap(size_t words) 
 {
+    // the minimum size of a block is 16 bytes (HDR, SUCC, PRED, FTR)
+    if (words < 4) {
+        words = 4;
+    }
     char *bp;
     size_t size;
 
@@ -340,10 +344,10 @@ static void *extend_heap(size_t words)
         return NULL;                                        //line:vm:mm:endextend
 
     /* Initialize free block header/footer and the epilogue header */
-    PUT(HDRP(bp), PACK(size, 0));         /* Free block header */   //line:vm:mm:freeblockhdr
-    PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */   //line:vm:mm:freeblockftr
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ //line:vm:mm:newepihdr
-
+    unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
+    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header */
+    PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
+    PUT(HDRP(NEXT_BLKP(bp)), NEW_PACK(0, 1, 0)); /* New epilogue header */
     /* Coalesce if the previous block was free */
     return coalesce(bp);                                          //line:vm:mm:returnblock
 }
@@ -359,17 +363,21 @@ static void place(void *bp, size_t asize)
 /* $end mmplace-proto */
 {
     size_t csize = GET_SIZE(HDRP(bp));   
+    unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
 
     if ((csize - asize) >= (2*DSIZE)) { 
-        PUT(HDRP(bp), PACK(asize, 1));
-        PUT(FTRP(bp), PACK(asize, 1));
+        PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
+        // The block is used, no need to save a footer
+        // PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(csize-asize, 0));
-        PUT(FTRP(bp), PACK(csize-asize, 0));
+        PUT(HDRP(bp), NEW_PACK(csize-asize, 0, 1));
+        PUT(FTRP(bp), NEW_PACK(csize-asize, 0, 1));
+        coalesce(bp);
     }
-    else { 
-        PUT(HDRP(bp), PACK(csize, 1));
-        PUT(FTRP(bp), PACK(csize, 1));
+    else {
+        PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
+        // The block is used, no need to save a footer
+        // PUT(FTRP(bp), PACK(csize, 1));
     }
 }
 /* $end mmplace */
