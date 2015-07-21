@@ -298,20 +298,12 @@ static void *coalesce(void *bp)
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
         dbg_printf("case 2\n");
         void *prev_bp = PREV_BLKP(bp);
-        dbg_printf("bang!!\n");
-        printblock(bp);
-        printblock(prev_bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
-        dbg_printf("bang!!\n");
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         
-        dbg_printf("bang!!\n");
         size += GET_SIZE(HDRP(prev_bp));
-        dbg_printf("bang!!\n");
         PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
-        dbg_printf("bang!!\n");
         PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
-        dbg_printf("bang!!\n");
         bp = prev_bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         dbg_printf("case 3\n");
