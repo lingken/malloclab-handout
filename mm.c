@@ -105,22 +105,18 @@ static void checkblock(void *bp);
  */
 int mm_init(void) {
     /* Create the initial empty heap */
+    root = NULL;
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) //line:vm:mm:begininit
         return -1;
     PUT(heap_listp, 0);                          /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); /* Prologue header */ 
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */ 
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));     /* Epilogue header */
+    PUT(heap_listp + (1*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue header */ 
+    PUT(heap_listp + (2*WSIZE), NEW_PACK(DSIZE, 1, 1)); /* Prologue footer */ 
+    PUT(heap_listp + (3*WSIZE), NEW_PACK(0, 1, 1));     /* Epilogue header */
     heap_listp += (2*WSIZE);                     //line:vm:mm:endinit  
-    /* $end mminit */
 
-#ifdef NEXT_FIT
-    rover = heap_listp;
-#endif
-    /* $begin mminit */
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
+    if ((root = extend_heap(CHUNKSIZE/WSIZE)) == NULL) 
         return -1;
     return 0;
 }
@@ -131,22 +127,26 @@ int mm_init(void) {
 void *malloc (size_t size) {
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
+    size_t tmp;
     char *bp;      
 
-    /* $end mmmalloc */
     if (heap_listp == 0){
         mm_init();
     }
-    /* $begin mmmalloc */
+
     /* Ignore spurious requests */
     if (size == 0)
         return NULL;
 
     /* Adjust block size to include overhead and alignment reqs. */
-    if (size <= DSIZE)                                          //line:vm:mm:sizeadjust1
-        asize = 2*DSIZE;                                        //line:vm:mm:sizeadjust2
-    else
-        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); //line:vm:mm:sizeadjust3
+    if (size <= DSIZE){                                          //line:vm:mm:sizeadjust1
+        asize = 2*DSIZE;
+    }                                        //line:vm:mm:sizeadjust2
+    else{
+        // asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); //line:vm:mm:sizeadjust3
+        tmp = (size + (WSIZE - 1)) / WSIZE; // real payload
+        asize = (tmp & 0x1 ? (tmp + 1) : (tmp + 2)) * WSIZE;
+    }
 
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) {  //line:vm:mm:findfitcall
@@ -258,7 +258,11 @@ static void *coalesce(void *bp)
     size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     unsigned int size = GET_SIZE(HDRP(bp));
-    if (prev_alloc && next_alloc) { // Case 1
+    if (root == NULL) {
+        root = bp;
+        PUT(PREDP(bp), 0);
+        PUT(SUCCP(bp), 0);
+    } else if (prev_alloc && next_alloc) { // Case 1
         PUT(PREDP(root), HEAP_OFFSET(bp));
         PUT(SUCCP(bp), HEAP_OFFSET(root));
         PUT(PREDP(bp), 0);
@@ -328,7 +332,6 @@ static void *coalesce(void *bp)
 /* 
  * extend_heap - Extend heap with free block and return its block pointer
  */
-/* $begin mmextendheap */
 static void *extend_heap(size_t words) 
 {
     // the minimum size of a block is 16 bytes (HDR, SUCC, PRED, FTR)
@@ -351,7 +354,6 @@ static void *extend_heap(size_t words)
     /* Coalesce if the previous block was free */
     return coalesce(bp);                                          //line:vm:mm:returnblock
 }
-/* $end mmextendheap */
 
 /* 
  * place - Place block of asize bytes at start of free block bp 
