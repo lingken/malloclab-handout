@@ -227,7 +227,16 @@ void *realloc(void *ptr, size_t size) {
  * needed to run the traces.
  */
 void *calloc (size_t nmemb, size_t size) {
-    return NULL;
+    size_t bytes = nmemb * size;
+    void *newptr;
+
+    newptr = malloc(bytes);
+    if (newptr == NULL) {
+        return NULL;
+    }
+    memset(newptr, 0, bytes);
+
+    return newptr;
 }
 
 
