@@ -67,7 +67,8 @@
 /* $end mallocmacros */
 
 /* Global variables */
-static char *heap_listp = 0;  /* Pointer to first block */  
+static char *heap_listp = 0;  /* Pointer to first block */ 
+static char *root = 0; 
 #ifdef NEXT_FIT
 static char *rover;           /* Next fit rover */
 #endif
@@ -79,12 +80,12 @@ static char *rover;           /* Next fit rover */
 
 /* Given block ptr bp, compute the block ptr of its successor or predecessor
    in the explicit free list */
-#define SUCC_FREE_BLKP(bp) (heap_listp + GET(SUCCP(bp)))
-#define PRED_FREE_BLKP(bp) (heap_listp + GET(PREDP(bp)))
+#define SUCC_FREE_BLKP(bp)  ((GET(SUCCP(bp))) ? (heap_listp + GET(SUCCP(bp))) : (0))
+#define PRED_FREE_BLKP(bp)  ((GET(PREDP(bp))) ? (heap_listp + GET(PREDP(bp))) : (0))
 
 /* compute the relative offset from a block pointer to first block of heap
    which saves space than storing a real pointer in the block */
-HEAP_OFFSET(bp) ((char *)(bp) - heap_listp)
+#define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0))
 
 /* See if the previous block is allocated to eliminate unneccesary footer fields*/
 #define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
@@ -96,9 +97,10 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
+static void checkheap(int lineno, int verbose);
 static void printblock(void *bp); 
-static void checkheap(int verbose);
-static void checkblock(void *bp);
+static void checkblock(void *bp, int lineno);
+static size_t check_list(int lineno, int verbose);
 
 /*
  * Initialize: return -1 on error, 0 on success.
@@ -114,10 +116,11 @@ int mm_init(void) {
     PUT(heap_listp + (3*WSIZE), NEW_PACK(0, 1, 1));     /* Epilogue header */
     heap_listp += (2*WSIZE);                     //line:vm:mm:endinit  
 
-
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if ((root = extend_heap(CHUNKSIZE/WSIZE)) == NULL) 
+    if ((root = extend_heap(CHUNKSIZE/WSIZE)) == NULL){ 
         return -1;
+    }
+    checkheap(__LINE__, 0);
     return 0;
 }
 
@@ -159,6 +162,7 @@ void *malloc (size_t size) {
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL)  
         return NULL;                                  //line:vm:mm:growheap2
     place(bp, asize);                                 //line:vm:mm:growheap3
+    checkheap(__LINE__, 0);
     return bp;
 }
 
@@ -239,7 +243,6 @@ void *calloc (size_t nmemb, size_t size) {
     return newptr;
 }
 
-
 /*
  * Return whether the pointer is in the heap.
  * May be useful for debugging.
@@ -256,28 +259,26 @@ static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
 
-/*
- * mm_checkheap
- */
-void mm_checkheap(int lineno) {
-}
-
 static void *coalesce(void *bp) 
 {
+    checkheap(__LINE__, 0);
     size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     unsigned int size = GET_SIZE(HDRP(bp));
     if (root == NULL) {
+        printf("case 0\n");
         root = bp;
         PUT(PREDP(bp), 0);
         PUT(SUCCP(bp), 0);
     } else if (prev_alloc && next_alloc) { // Case 1
+        printf("case 1\n");
         PUT(PREDP(root), HEAP_OFFSET(bp));
         PUT(SUCCP(bp), HEAP_OFFSET(root));
         PUT(PREDP(bp), 0);
         root = bp;
 
     } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
+        printf("case 2\n");
         void *prev_bp = PREV_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
@@ -294,6 +295,7 @@ static void *coalesce(void *bp)
         PUT(PREDP(bp), 0);
         root = bp;
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
+        printf("case 3\n");
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
@@ -307,6 +309,7 @@ static void *coalesce(void *bp)
         PUT(PREDP(bp), 0);
         root = bp;
     } else { // Case 4 before free, after free
+        printf("case 4\n");
         void *prev_bp = PREV_BLKP(bp);
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
@@ -323,16 +326,9 @@ static void *coalesce(void *bp)
         PUT(SUCCP(bp), HEAP_OFFSET(root));
         PUT(PREDP(bp), 0);
     }
+    checkheap(__LINE__, 1);
     return bp;
 }
-
-// /* 
-//  * mm_checkheap - Check the heap for correctness
-//  */
-// void mm_checkheap(int verbose)  
-// { 
-//     checkheap(verbose);
-// }
 
 /* 
  * The remaining routines are internal helper routines 
@@ -380,6 +376,14 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
         // The block is used, no need to save a footer
         // PUT(FTRP(bp), PACK(asize, 1));
+        if (PRED_FREE_BLKP(bp) != NULL) {
+            PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
+        } else {
+            root = SUCC_FREE_BLKP(bp);
+        }
+        if (SUCC_FREE_BLKP(bp) != NULL) {
+            PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
+        }
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), NEW_PACK(csize-asize, 0, 1));
         PUT(FTRP(bp), NEW_PACK(csize-asize, 0, 1));
@@ -389,6 +393,14 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
         // The block is used, no need to save a footer
         // PUT(FTRP(bp), PACK(csize, 1));
+        if (PRED_FREE_BLKP(bp) != NULL) {
+            PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
+        } else {
+            root = SUCC_FREE_BLKP(bp);
+        }
+        if (SUCC_FREE_BLKP(bp) != NULL) {
+            PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
+        }
     }
 }
 /* $end mmplace */
@@ -405,7 +417,7 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp = root;
 
-    while (true) {
+    while (1) {
         if (GET_SIZE(HDRP(bp)) >= asize) {
             return bp;
         }
@@ -421,55 +433,134 @@ static void *find_fit(size_t asize)
 
 static void printblock(void *bp) 
 {
-    size_t hsize, halloc, fsize, falloc;
+    size_t hsize, halloc, hprevalloc, fsize, falloc, fprevalloc;
 
-    checkheap(0);
+    // checkheap(0);
     hsize = GET_SIZE(HDRP(bp));
-    halloc = GET_ALLOC(HDRP(bp));  
+    halloc = GET_ALLOC(HDRP(bp));
+    hprevalloc = GET_PREV_ALLOC(HDRP(bp));  
     fsize = GET_SIZE(FTRP(bp));
     falloc = GET_ALLOC(FTRP(bp));  
+    fprevalloc = GET_PREV_ALLOC(FTRP(bp));
 
     if (hsize == 0) {
         printf("%p: EOL\n", bp);
         return;
     }
 
-    printf("%p: header: [%ld:%c] footer: [%ld:%c]\n", bp, 
-           hsize, (halloc ? 'a' : 'f'), 
-           fsize, (falloc ? 'a' : 'f')); 
+    // printf("%p: header: [%ld:%c] footer: [%ld:%c]\n", bp, 
+    //        hsize, (halloc ? 'a' : 'f'), 
+    //        fsize, (falloc ? 'a' : 'f')); 
+    if (halloc) {
+        printf("%p: header: [%ld:%d:%d]\n", bp, hsize, halloc, hprevalloc);
+    } else {
+        printf("%p: header: [%ld:%d:%d] footer: [%ld:%d:%d] PRED: %x, SUCC: %x\n",
+            bp,
+            hsize, halloc, hprevalloc, fsize, falloc, fprevalloc,
+            GET(PREDP(bp)), GET(SUCCP(bp)));
+    }
 }
 
-static void checkblock(void *bp) 
-{
-    if ((size_t)bp % 8)
-        printf("Error: %p is not doubleword aligned\n", bp);
-    if (GET(HDRP(bp)) != GET(FTRP(bp)))
-        printf("Error: header does not match footer\n");
-}
-
-/* 
- * checkheap - Minimal check of the heap for consistency 
+/*
+ * mm_checkheap
  */
-void checkheap(int verbose) 
-{
+void mm_checkheap(int lineno) {
+    checkheap(lineno, 1);
+}
+void checkheap(int lineno, int verbose) {
+    if (verbose)
+        printf("**************************************\n");
     char *bp = heap_listp;
-
+    /* check prologue block */
     if (verbose)
         printf("Heap (%p):\n", heap_listp);
-
     if ((GET_SIZE(HDRP(heap_listp)) != DSIZE) || !GET_ALLOC(HDRP(heap_listp)))
-        printf("Bad prologue header\n");
-    checkblock(heap_listp);
+        printf("(%d) Bad prologue header\n", lineno);
+    checkblock(heap_listp, lineno);
 
+    size_t free_blocks = 0;
+    size_t prev_alloc = 1;
     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
         if (verbose) 
             printblock(bp);
-        checkblock(bp);
+        checkblock(bp, lineno);
+        if (GET_PREV_ALLOC(HDRP(bp)) != prev_alloc) {
+            printf("(%d) Error: %p prev_alloc bit: %d, alloc_bit of prev blk: %d\n", lineno, bp, GET_PREV_ALLOC(HDRP(bp)), prev_alloc);
+        }
+        if (prev_alloc == 0 && GET_ALLOC(HDRP(bp)) == 0) {
+            printf("(%d) Error: %p two consecutive free blocks in heap\n", lineno, bp);
+        }
+        if (!GET_ALLOC(HDRP(bp))) {
+            free_blocks ++;
+        }
     }
 
+    /* check epilogue block */
     if (verbose)
         printblock(bp);
     if ((GET_SIZE(HDRP(bp)) != 0) || !(GET_ALLOC(HDRP(bp))))
-        printf("Bad epilogue header\n");
+        printf("(%d) Bad epilogue header\n", lineno);
+
+    size_t free_blocks_in_list = check_list(lineno, verbose);
+    if (free_blocks != free_blocks_in_list) {
+        printf("(%d) free blocks: %ld, free blocks in list: %ld\n", lineno, free_blocks, free_blocks_in_list);
+    }
+}
+/* for all blocks except for epilogue block */
+static void checkblock(void *bp, int lineno) 
+{
+    /* check block's alignment */
+    if ((size_t)bp % 8)
+        printf("(%d) Error: %p is not doubleword aligned\n", lineno, bp);
+    // if (GET(HDRP(bp)) != GET(FTRP(bp)))
+        // printf("Error: header does not match footer\n");
+    if ((bp != heap_listp) && (GET_SIZE(HDRP(bp)) < 2 * DSIZE)) {
+        printf("(%d) Error: %p block size is smaller than minimum size\n", lineno, bp);
+    }
+    if (!GET_ALLOC(HDRP(bp))) {
+        // this is a free block, has its footer
+        if (GET(HDRP(bp)) != GET(FTRP(bp))){
+            printf("(%d) Error: header does not match footer\n", lineno);
+        }
+    }
 }
 
+static size_t check_list(int lineno, int verbose) {
+    if (verbose) {
+        printf("(%d) BEGIN check list:\n", lineno);
+    }
+    size_t free_blocks_in_list = 0;
+    printf("(%d) %d\n", lineno, free_blocks_in_list);
+    void *ptr = root;
+    if (ptr == NULL) {
+        return 0;
+    }
+    while (1) {
+        free_blocks_in_list ++;
+        if (verbose) {
+            printblock(ptr);
+        }
+
+        // if (!in_heap(ptr)) {
+        //     printf("(%d) %p out of heap\n", lineno, ptr);
+        // }
+        // if (GET(PREDP(ptr))) {
+        //     if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
+        //         printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
+        //     }
+        // }
+        if (GET(SUCCP(ptr))) {
+            if (PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
+                printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
+            }
+            ptr = SUCC_FREE_BLKP(ptr);
+        } else {
+            break;
+        }
+    }
+    printf("(%d) %d\n", lineno, free_blocks_in_list);
+    if (verbose) {
+        printf("(%d) END check list\n", lineno);
+    }
+    return free_blocks_in_list;
+}
