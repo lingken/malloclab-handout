@@ -302,9 +302,11 @@ static void *coalesce(void *bp)
         checkheap(__LINE__, 1);
         void *prev_bp = PREV_BLKP(bp);
         printf("bang! prev_bp: %p\n", prev_bp);
-        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        if (SUCCP(PRED_FREE_BLKP(prev_bp)) != NULL)
+            PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
         printf("bang!\n");
-        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+        if (PREDP(SUCC_FREE_BLKP(prev_bp)) != NULL)
+            PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         printf("bang!\n");
         size += GET_SIZE(HDRP(prev_bp));
         PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
