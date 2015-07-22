@@ -16,7 +16,7 @@
 /* If you want debugging output, use the following macro.  When you hand
  * in, remove the #define DEBUG line. */
 
-#define DEBUG
+// #define DEBUG
 #ifdef DEBUG
 # define dbg_printf(...) printf(__VA_ARGS__)
 # define dbg_checkheap(...) checkheap(__VA_ARGS__)
@@ -45,7 +45,7 @@
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */ //line:vm:mm:beginconst
 #define DSIZE       8       /* Double word size (bytes) */
-#define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
+#define CHUNKSIZE  (1<<9)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
@@ -74,44 +74,47 @@
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) //line:vm:mm:prevblkp
 /* $end mallocmacros */
 
-/*
-    My code to check user allocated memory
-*/
-#define ARRAY_SIZE 2000
-typedef struct user_mm {
-    char *bp;
-    size_t size;
-} user_mm;
-static user_mm user_mm_array[ARRAY_SIZE];
-static int mm_array_tail = 0;
-static void add_to_user_mm_array(char *bp, size_t size) {
-    if (mm_array_tail == ARRAY_SIZE) {
-        printf("too many blocks for array\n");
-        exit(1);
-    }
-    user_mm_array[mm_array_tail].bp = bp;
-    user_mm_array[mm_array_tail].size = size;
-    mm_array_tail ++;
-}
-static void remove_from_user_mm_array(char *bp) {
-    int i = 0;
-    for (i = 0; i < mm_array_tail; i ++) {
-        if (user_mm_array[i].bp == bp) {
-            user_mm_array[i].bp = 0;
-            user_mm_array[i].size = 0;
-            return;
-        }
-    }
-    printf("error free: no corresponding block in user mm array: %p\n", bp);
-}
-static void check_access_user_memory(char *ptr, int lineno) {
-    int i = 0;
-    for (i = 0; i < mm_array_tail; i ++) {
-        if ((ptr >= user_mm_array[i].bp) && (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
-            printf("(%d) Invalid access user allocated memory, ptr: %p\n", lineno, ptr);
-        }
-    }
-}
+// /*
+//     My code to check user allocated memory
+// */
+// #if DEBUG
+// #define ARRAY_SIZE 2000
+// typedef struct user_mm {
+//     char *bp;
+//     size_t size;
+// } user_mm;
+// static user_mm user_mm_array[ARRAY_SIZE];
+// static int mm_array_tail = 0;
+// static void add_to_user_mm_array(char *bp, size_t size) {
+//     if (mm_array_tail == ARRAY_SIZE) {
+//         printf("too many blocks for array\n");
+//         exit(1);
+//     }
+//     user_mm_array[mm_array_tail].bp = bp;
+//     user_mm_array[mm_array_tail].size = size;
+//     mm_array_tail ++;
+// }
+// static void remove_from_user_mm_array(char *bp) {
+//     int i = 0;
+//     for (i = 0; i < mm_array_tail; i ++) {
+//         if (user_mm_array[i].bp == bp) {
+//             user_mm_array[i].bp = 0;
+//             user_mm_array[i].size = 0;
+//             return;
+//         }
+//     }
+//     printf("error free: no corresponding block in user mm array: %p\n", bp);
+// }
+// static void check_access_user_memory(char *ptr, int lineno) {
+//     int i = 0;
+//     for (i = 0; i < mm_array_tail; i ++) {
+//         if ((ptr >= user_mm_array[i].bp) && (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
+//             printf("(%d) Invalid access user allocated memory, ptr: %p\n", lineno, ptr);
+//         }
+//     }
+// }
+// #endif
+
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */ 
 static char *root = 0;
@@ -154,11 +157,13 @@ static size_t check_list(int lineno, int verbose);
  */
 int mm_init(void) {
     dbg_printf("INIT\n");
+    #if DEBUG
     /*
         my code to check acess to user allocated memory
     */
     memset(user_mm_array, 0, ARRAY_SIZE * sizeof(user_mm));
     mm_array_tail = 0;
+    #endif
 
     /* Create the initial empty heap */
     root = NULL;
@@ -224,7 +229,9 @@ void *malloc (size_t size) {
         place(bp, asize);                  //line:vm:mm:findfitplace
         dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (find_fit succeed)\n");
+        #if DEBUG
         add_to_user_mm_array(bp, size);
+        #endif
         return bp;
     }
 
@@ -238,7 +245,9 @@ void *malloc (size_t size) {
     place(bp, asize);                                 //line:vm:mm:growheap3
     dbg_checkheap(__LINE__, 0);
     dbg_printf("END MALLOC (extend_heap)\n");
+    #if DEBUG
     add_to_user_mm_array(bp, size);
+    #endif
     return bp;
 }
 
@@ -259,7 +268,9 @@ void free (void *bp) {
         mm_init();
     }
     /* $begin mmfree */
+    #if DEBUG
     remove_from_user_mm_array(bp);
+    #endif
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc));
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
