@@ -144,7 +144,7 @@ int mm_init(void) {
  * malloc
  */
 void *malloc (size_t size) {
-    dbg_printf("MALLOC\n");
+    dbg_printf("MALLOC (size: %ld)\n", size);
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     size_t tmp;
@@ -302,9 +302,9 @@ static void *coalesce(void *bp)
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         
         size += GET_SIZE(HDRP(prev_bp));
-        PUT(HDRP(prev_bp), NEW_PACK(size, 0, 1));
-        PUT(FTRP(prev_bp), NEW_PACK(size, 0, 1)); // in fact, no need to store prev_alloc_bit in FTR
         bp = prev_bp;
+        
+        
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         dbg_printf("case 3\n");
         void *next_bp = NEXT_BLKP(bp);
@@ -312,8 +312,6 @@ static void *coalesce(void *bp)
         PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
 
         size += GET_SIZE(HDRP(next_bp));
-        PUT(HDRP(bp), NEW_PACK(size, 0, 1));
-        PUT(FTRP(bp), NEW_PACK(size, 0, 1));
     } else { // Case 4 before free, after free
         dbg_printf("case 4\n");
         void *prev_bp = PREV_BLKP(bp);
@@ -325,9 +323,10 @@ static void *coalesce(void *bp)
 
         size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
         bp = prev_bp;
-        PUT(HDRP(bp), NEW_PACK(size, 0, 1));
-        PUT(FTRP(bp), NEW_PACK(size, 0, 1));
     }
+    PUT(HDRP(bp), NEW_PACK(size, 0, 1));
+    PUT(FTRP(bp), NEW_PACK(size, 0, 1));
+
     PUT(SUCCP(bp), HEAP_OFFSET(SUCC_FREE_BLKP(root)));
     PUT(PREDP(bp), HEAP_OFFSET(root));
     PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(bp));
@@ -371,8 +370,8 @@ static void *extend_heap(size_t words)
     
     char *epi = NEXT_BLKP(bp);
     PUT(HDRP(epi), NEW_PACK(0, 1, 0)); /* New epilogue header */
+    
     PUT(PREDP(epi), HEAP_OFFSET(pred_block_in_list));
-
     PUT(SUCCP(pred_block_in_list), HEAP_OFFSET(epi));
     PUT(SUCCP(epi), 0);
     tail = epi;
@@ -409,7 +408,7 @@ static void place(void *bp, size_t asize)
     else {
         // dbg_printf("Case: (csize - asize) < (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
-        // The block is used, no need to save a footer
+        // The block is used, no footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
 
