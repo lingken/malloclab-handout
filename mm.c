@@ -25,7 +25,6 @@
 # define dbg_checkheap(...)
 #endif
 
-
 /* do not change the following! */
 #ifdef DRIVER
 /* create aliases for driver tests */
@@ -45,7 +44,7 @@
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */ //line:vm:mm:beginconst
 #define DSIZE       8       /* Double word size (bytes) */
-#define CHUNKSIZE  (1<<9)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
+#define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
@@ -74,54 +73,51 @@
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) //line:vm:mm:prevblkp
 /* $end mallocmacros */
 
-// /*
-//     My code to check user allocated memory
-// */
-// #if DEBUG
-// #define ARRAY_SIZE 2000
-// typedef struct user_mm {
-//     char *bp;
-//     size_t size;
-// } user_mm;
-// static user_mm user_mm_array[ARRAY_SIZE];
-// static int mm_array_tail = 0;
-// static void add_to_user_mm_array(char *bp, size_t size) {
-//     if (mm_array_tail == ARRAY_SIZE) {
-//         printf("too many blocks for array\n");
-//         exit(1);
-//     }
-//     user_mm_array[mm_array_tail].bp = bp;
-//     user_mm_array[mm_array_tail].size = size;
-//     mm_array_tail ++;
-// }
-// static void remove_from_user_mm_array(char *bp) {
-//     int i = 0;
-//     for (i = 0; i < mm_array_tail; i ++) {
-//         if (user_mm_array[i].bp == bp) {
-//             user_mm_array[i].bp = 0;
-//             user_mm_array[i].size = 0;
-//             return;
-//         }
-//     }
-//     printf("error free: no corresponding block in user mm array: %p\n", bp);
-// }
-// static void check_access_user_memory(char *ptr, int lineno) {
-//     int i = 0;
-//     for (i = 0; i < mm_array_tail; i ++) {
-//         if ((ptr >= user_mm_array[i].bp) && (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
-//             printf("(%d) Invalid access user allocated memory, ptr: %p\n", lineno, ptr);
-//         }
-//     }
-// }
-// #endif
+/*
+    My code to check user allocated memory
+*/
+#if DEBUG
+#define ARRAY_SIZE 2000
+typedef struct user_mm {
+    char *bp;
+    size_t size;
+} user_mm;
+static user_mm user_mm_array[ARRAY_SIZE];
+static int mm_array_tail = 0;
+static void add_to_user_mm_array(char *bp, size_t size) {
+    if (mm_array_tail == ARRAY_SIZE) {
+        printf("too many blocks for array\n");
+        exit(1);
+    }
+    user_mm_array[mm_array_tail].bp = bp;
+    user_mm_array[mm_array_tail].size = size;
+    mm_array_tail ++;
+}
+static void remove_from_user_mm_array(char *bp) {
+    int i = 0;
+    for (i = 0; i < mm_array_tail; i ++) {
+        if (user_mm_array[i].bp == bp) {
+            user_mm_array[i].bp = 0;
+            user_mm_array[i].size = 0;
+            return;
+        }
+    }
+    printf("error free: no corresponding block in user mm array: %p\n", bp);
+}
+static void check_access_user_memory(char *ptr, int lineno) {
+    int i = 0;
+    for (i = 0; i < mm_array_tail; i ++) {
+        if ((ptr >= user_mm_array[i].bp) && (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
+            printf("(%d) Invalid access user allocated memory, ptr: %p\n", lineno, ptr);
+        }
+    }
+}
+#endif
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */ 
 static char *root = 0;
 static char *tail = 0;
-#ifdef NEXT_FIT
-static char *rover;           /* Next fit rover */
-#endif
 
 /* Given block ptr bp, compute address of its successor or predecessor
    field which stores the offset of adjacent block in the explicit free list*/
@@ -135,7 +131,8 @@ static char *rover;           /* Next fit rover */
 
 /* compute the relative offset from a block pointer to first block of heap
    which saves space than storing a real pointer in the block */
-#define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0)) // heap_listp is 0x800000008 after first moving
+// #define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0)) // heap_listp is 0x800000008 after first moving
+#define HEAP_OFFSET(bp) ((char *)(bp) - heap_listp)
 
 /* See if the previous block is allocated to eliminate unneccesary footer fields*/
 #define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
@@ -256,24 +253,33 @@ void *malloc (size_t size) {
  */
 void free (void *bp) {
     dbg_printf("FREE\n");
-    /* $end mmfree */
     if (bp == 0) 
         return;
 
-    /* $begin mmfree */
     size_t size = GET_SIZE(HDRP(bp));
-    /* $end mmfree */
 
     if (heap_listp == 0){
         mm_init();
     }
-    /* $begin mmfree */
+
     #if DEBUG
     remove_from_user_mm_array(bp);
     #endif
+
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc));
     PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
+
+    void *next_bp = NEXT_BLKP(bp);
+
+    // change the prev_alloc bit of next block
+    unsigned int block_size = GET_SIZE(HDRP(next_bp));
+    unsigned int block_alloced = GET_ALLOC(HDRP(next_bp));
+    PUT(HDRP(next_bp), NEW_PACK(block_size, block_alloced, 0));
+    if (!block_alloced) {
+        // next_block is free, the block can't be epilogue either
+        PUT(FTRP(next_bp), NEW_PACK(block_size, block_alloced, 0));
+    }
     coalesce(bp);
     dbg_printf("END FREE\n");
 }
@@ -364,8 +370,7 @@ static void *coalesce(void *bp)
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         
         size += GET_SIZE(HDRP(prev_bp));
-        bp = prev_bp;
-        
+        bp = prev_bp;    
         
     } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
         dbg_printf("case 3\n");
@@ -456,7 +461,7 @@ static void place(void *bp, size_t asize)
     size_t csize = GET_SIZE(HDRP(bp));   
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     if ((csize - asize) >= (2*DSIZE)) {
-        // dbg_printf("Case: (csize - asize) >= (2*DSIZE)\n");
+        dbg_printf("Case: (csize - asize) >= (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
         // The block is used, no need to save a footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
@@ -468,7 +473,7 @@ static void place(void *bp, size_t asize)
         coalesce(bp);
     }
     else {
-        // dbg_printf("Case: (csize - asize) < (2*DSIZE)\n");
+        dbg_printf("Case: (csize - asize) < (2*DSIZE)\n");
         PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
         // The block is used, no footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
@@ -493,9 +498,6 @@ static void place(void *bp, size_t asize)
 
 static void *find_fit(size_t asize)
 {
-    if (root == NULL) {
-        return NULL;
-    }
     /* First-fit search */
     void *bp = SUCC_FREE_BLKP(root);
     while (bp != tail) {
@@ -573,6 +575,7 @@ void checkheap(int lineno, int verbose) {
         if (!GET_ALLOC(HDRP(bp))) {
             free_blocks ++;
         }
+        prev_alloc = GET_ALLOC(HDRP(bp));
     }
 
     /* check epilogue block */
