@@ -82,6 +82,8 @@ typedef struct user_mm {
     char *bp;
     size_t size;
 } user_mm;
+// the global array is onle used for debugging, which will not be
+// defined when actually using this memory allocator
 static user_mm user_mm_array[ARRAY_SIZE];
 static int mm_array_tail = 0;
 static void add_to_user_mm_array(char *bp, size_t size) {
@@ -148,16 +150,17 @@ static void checkheap(int lineno, int verbose);
 static void printblock(void *bp); 
 static void checkblock(void *bp, int lineno);
 static size_t check_list(int lineno, int verbose);
-
+static inline void *get_root(size_t asize);
 /*
  * Initialize: return -1 on error, 0 on success.
  */
 int mm_init(void) {
     dbg_printf("INIT\n");
-    #ifdef DEBUG
+
     /*
         my code to check acess to user allocated memory
     */
+    #ifdef DEBUG
     memset(user_mm_array, 0, ARRAY_SIZE * sizeof(user_mm));
     mm_array_tail = 0;
     #endif
