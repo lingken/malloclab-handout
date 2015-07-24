@@ -76,7 +76,7 @@
 /*
     My code to check user allocated memory
 */
-#if DEBUG
+#ifdef DEBUG
 #define ARRAY_SIZE 2000
 typedef struct user_mm {
     char *bp;
@@ -154,7 +154,7 @@ static size_t check_list(int lineno, int verbose);
  */
 int mm_init(void) {
     dbg_printf("INIT\n");
-    #if DEBUG
+    #ifdef DEBUG
     /*
         my code to check acess to user allocated memory
     */
@@ -226,7 +226,7 @@ void *malloc (size_t size) {
         place(bp, asize);                  //line:vm:mm:findfitplace
         dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (find_fit succeed)\n");
-        #if DEBUG
+        #ifdef DEBUG
         add_to_user_mm_array(bp, size);
         #endif
         return bp;
@@ -242,7 +242,7 @@ void *malloc (size_t size) {
     place(bp, asize);                                 //line:vm:mm:growheap3
     dbg_checkheap(__LINE__, 0);
     dbg_printf("END MALLOC (extend_heap)\n");
-    #if DEBUG
+    #ifdef DEBUG
     add_to_user_mm_array(bp, size);
     #endif
     return bp;
@@ -262,7 +262,7 @@ void free (void *bp) {
         mm_init();
     }
 
-    #if DEBUG
+    #ifdef DEBUG
     remove_from_user_mm_array(bp);
     #endif
 
@@ -498,7 +498,7 @@ static void place(void *bp, size_t asize)
 
 static void *find_fit(size_t asize)
 {
-    /* First-fit search */
+    // /* First-fit search */
     void *bp = SUCC_FREE_BLKP(root);
     while (bp != tail) {
         if (GET_SIZE(HDRP(bp)) >= asize) {
@@ -507,6 +507,21 @@ static void *find_fit(size_t asize)
         bp = SUCC_FREE_BLKP(bp);
     }
     return NULL; /* No fit */
+
+    // Best-fit
+    // void *bp = SUCC_FREE_BLKP(root);
+    // void *rt = NULL;
+    // unsigned int min_size = -1;
+    // unsigned int block_size = 0;
+    // while (bp != tail) {
+    //     block_size = GET_SIZE(HDRP(bp));
+    //     if (block_size >= asize && block_size < min_size) {
+    //         min_size = block_size;
+    //         rt = bp;
+    //     }
+    //     bp = SUCC_FREE_BLKP(bp);
+    // }
+    // return rt;
 }
 
 static void printblock(void *bp) 
@@ -521,14 +536,14 @@ static void printblock(void *bp)
     fprevalloc = GET_PREV_ALLOC(FTRP(bp));
 
     if (hsize == 0) {
-        printf("%p: EOL   :[%ld:%d:%d]\n", bp, hsize, halloc, hprevalloc);
+        printf("%p: EOL   :[%ld:%ld:%ld]\n", bp, hsize, halloc, hprevalloc);
         return;
     }
  
     if (halloc) {
-        printf("%p: header: [%ld:%d:%d]\n", bp, hsize, halloc, hprevalloc);
+        printf("%p: header: [%ld:%ld:%ld]\n", bp, hsize, halloc, hprevalloc);
     } else {
-        printf("%p: header: [%ld:%d:%d] footer: [%ld:%d:%d] PRED: %x, SUCC: %x\n",
+        printf("%p: header: [%ld:%ld:%ld] footer: [%ld:%ld:%ld] PRED: %x, SUCC: %x\n",
             bp,
             hsize, halloc, hprevalloc, fsize, falloc, fprevalloc,
             GET(PREDP(bp)) + 0x8, GET(SUCCP(bp)) + 0x8);
@@ -567,7 +582,7 @@ void checkheap(int lineno, int verbose) {
             printblock(bp);
         checkblock(bp, lineno);
         if (GET_PREV_ALLOC(HDRP(bp)) != prev_alloc) {
-            printf("(%d) Error: %p prev_alloc bit: %d, alloc_bit of prev blk: %d\n", lineno, bp, GET_PREV_ALLOC(HDRP(bp)), prev_alloc);
+            printf("(%d) Error: %p prev_alloc bit: %d, alloc_bit of prev blk: %zu\n", lineno, bp, GET_PREV_ALLOC(HDRP(bp)), prev_alloc);
         }
         if (prev_alloc == 0 && GET_ALLOC(HDRP(bp)) == 0) {
             printf("(%d) Error: %p two consecutive free blocks in heap\n", lineno, bp);
@@ -594,7 +609,7 @@ void checkheap(int lineno, int verbose) {
 static void checkblock(void *bp, int lineno) 
 {
     /* check block's alignment */
-    if ((size_t)bp % 8)
+    if (!aligned(bp))
         printf("(%d) Error: %p is not doubleword aligned\n", lineno, bp);
     // if (GET(HDRP(bp)) != GET(FTRP(bp)))
         // printf("Error: header does not match footer\n");
@@ -612,7 +627,7 @@ static void checkblock(void *bp, int lineno)
 static size_t check_list(int lineno, int verbose) {
     if (verbose) {
         printf("(%d) Explicit list:\n", lineno);
-        printf("root: %p, pred: %p, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
+        printf("root: %p, pred: %x, succ: %p\n", root, GET(PREDP(root)), SUCC_FREE_BLKP(root));
     }
     size_t free_blocks_in_list = 0;
     // printf("(%d) %d\n", lineno, free_blocks_in_list);
@@ -638,8 +653,9 @@ static size_t check_list(int lineno, int verbose) {
     }
 
     if (verbose) {
-        printf("tail: %p, pred: %p, succ: %p\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
+        printf("tail: %p, pred: %p, succ: %x\n", tail, PRED_FREE_BLKP(tail), GET(SUCCP(tail)));
         printf("(%d) END check list\n", lineno);
     }
+
     return free_blocks_in_list;
 }
