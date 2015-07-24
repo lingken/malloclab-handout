@@ -45,7 +45,7 @@
 #define WSIZE       4       /* Word and header/footer size (bytes) */ //line:vm:mm:beginconst
 #define DSIZE       8       /* Double word size (bytes) */
 #define CHUNKSIZE  (1<<9)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
-#define N_SEGLIST 7
+#define N_SEGLIST   13      /* should be an odd number */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
@@ -518,7 +518,7 @@ static void place(void *bp, size_t asize)
 
 static void *find_fit(size_t asize)
 {
-    // /* First-fit search */
+    /* First-fit search */
     char *root = get_root(asize);
     while (root != (heap_startp + ((N_SEGLIST + 2)*WSIZE))){
         void *bp = SUCC_FREE_BLKP(root);
@@ -532,18 +532,25 @@ static void *find_fit(size_t asize)
     }
     return NULL; /* No fit */
 
-    // Best-fit
-    // void *bp = SUCC_FREE_BLKP(root);
+    // // Best-fit in a level
     // void *rt = NULL;
     // unsigned int min_size = -1;
     // unsigned int block_size = 0;
-    // while (bp != tail) {
-    //     block_size = GET_SIZE(HDRP(bp));
-    //     if (block_size >= asize && block_size < min_size) {
-    //         min_size = block_size;
-    //         rt = bp;
+    // char *root = get_root(asize);
+    // while (root != (heap_startp + ((N_SEGLIST + 2)*WSIZE))){
+    //     void *bp = SUCC_FREE_BLKP(root);
+    //     while (bp != tail) {
+    //         block_size = GET_SIZE(HDRP(bp));
+    //         if (block_size >= asize && block_size < min_size) {
+    //             rt = bp;
+    //             min_size = block_size;
+    //         }
+    //         bp = SUCC_FREE_BLKP(bp);
     //     }
-    //     bp = SUCC_FREE_BLKP(bp);
+    //     if (rt) {
+    //         break;
+    //     }
+    //     root = root + WSIZE;
     // }
     // return rt;
 }
