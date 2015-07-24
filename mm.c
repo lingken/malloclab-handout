@@ -519,13 +519,16 @@ static void place(void *bp, size_t asize)
 static void *find_fit(size_t asize)
 {
     // /* First-fit search */
-    void *root = get_root(asize);
-    void *bp = SUCC_FREE_BLKP(root);
-    while (bp != tail) {
-        if (GET_SIZE(HDRP(bp)) >= asize) {
-            return bp;
+    char *root = get_root(asize);
+    while (root != (heap_startp + ((N_SEGLIST + 2)*WSIZE))){
+        void *bp = SUCC_FREE_BLKP(root);
+        while (bp != tail) {
+            if (GET_SIZE(HDRP(bp)) >= asize) {
+                return bp;
+            }
+            bp = SUCC_FREE_BLKP(bp);
         }
-        bp = SUCC_FREE_BLKP(bp);
+        root = root + WSIZE;
     }
     return NULL; /* No fit */
 
