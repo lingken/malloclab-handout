@@ -589,7 +589,6 @@ void mm_checkheap(int lineno) {
 }
 
 void checkheap(int lineno, int verbose) {
-    verbose = 1;
     if (verbose){
         if (lineno == 1) {
             printf("============================================\n");
@@ -678,7 +677,8 @@ static size_t check_list(int lineno, int verbose) {
     int i = 0;
     for (i = 0; i < N_SEGLIST; i ++) {
         void *root = heap_startp + ((i + 2)*WSIZE);
-        printf("root (size %d): %p\n", (1 << (4+i)), root);
+        unsigned int level_size = (1 << (4+i));
+        printf("root (size %u): %p\n", level_size, root);
 
         void *ptr = SUCC_FREE_BLKP(root);
         while (ptr != tail) {
@@ -686,7 +686,6 @@ static size_t check_list(int lineno, int verbose) {
             if (verbose) {
                 printblock(ptr);
             }
-
             if (!in_heap(ptr)) {
                 printf("(%d) %p out of heap\n", lineno, ptr);
             }
@@ -696,6 +695,16 @@ static size_t check_list(int lineno, int verbose) {
             }
             if ((SUCC_FREE_BLKP(ptr) != tail) && PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
                 printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
+            }
+            unsigned int block_size = GET_SIZE(HDRP(ptr));
+            if (i != N_SEGLIST - 1) {
+                if (block_size < level_size || block_size >= 2 * level_size) {
+                    printf("(%d) %p with size of %u in the wrong list %u\n", lineno, ptr, block_size, level_size);
+                }
+            } else {
+                if (block_size < level_size) {
+                    printf("(%d) %p with size of %u in the wrong list %u\n", lineno, ptr, block_size, level_size);
+                }
             }
             ptr = SUCC_FREE_BLKP(ptr);
         }
