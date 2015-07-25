@@ -23,7 +23,7 @@
                         -logue)                                -logue)
 
  Tail is the end sentinel of all level of seglist. The second byte of tail immitates the PRED field which gurantees the uniform of coding.
- Seg_header_i stores the offset of first element in i-level seglist. It stores offset of tail (0) when i-levle seglist is empty.
+ Seg_header_i (equals SUCC field) stores the offset of first element in i-level seglist. It stores offset of tail (0) when i-levle seglist is empty.
  Prologue block and epilogue block have 8 bytes (HDR, FTR) and 4 bytes (HDR) respectively as are shown above.
 
  Segregated list is organized as follows:
@@ -60,7 +60,7 @@
 #define calloc mm_calloc
 #endif /* def DRIVER */
 
-/* single word (4) or double word (8) alignment */
+/* 8-byte alignment */
 #define ALIGNMENT 8
 
 /* rounds up to the nearest multiple of ALIGNMENT */
@@ -73,33 +73,44 @@
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
-/* Pack a size and allocated bit into a word */
-#define PACK(size, alloc)  ((size) | (alloc)) //line:vm:mm:pack
+/* pack a size, allocated bit of current block and allocated bit of previous block into a word */
+#define PACK(size, alloc, prev_alloc) ((size) | (alloc) | (prev_alloc << 1))
 
 /* Read and write a word at address p */
-#define GET(p)       (*(unsigned int *)(p))            //line:vm:mm:get
+#define GET(p)       (*(unsigned int *)(p))
 
 #ifdef DEBUG
- #define PUT(p, val)  (*(unsigned int *)(p) = (val)); check_access_user_memory(p, __LINE__);    //line:vm:mm:put
+ #define PUT(p, val)  (*(unsigned int *)(p) = (val)); check_access_user_memory(p, __LINE__);
 #else
- #define PUT(p, val)  (*(unsigned int *)(p) = (val))    //line:vm:mm:put
+ #define PUT(p, val)  (*(unsigned int *)(p) = (val))   
 #endif
 
-/* Read the size and allocated fields from address p */
-#define GET_SIZE(p)  (GET(p) & ~0x7)                   //line:vm:mm:getsize
-#define GET_ALLOC(p) (GET(p) & 0x1)                    //line:vm:mm:getalloc
+/* Read the size, allocated bit block and allocated bit of previous block from address p */
+#define GET_SIZE(p)  (GET(p) & ~0x7) 
+#define GET_ALLOC(p) (GET(p) & 0x1)
+#define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
 
-/* Given block ptr bp, compute address of its header and footer */
-#define HDRP(bp)       ((char *)(bp) - FSIZE)                      //line:vm:mm:hdrp
-#define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - 2*FSIZE) //line:vm:mm:ftrp
+/* Given block ptr bp, compute address of its HDR, SUCC, PRED and FTR */
+#define HDRP(bp)       ((char *)(bp) - FSIZE) 
+#define FTRP(bp)       ((char *)(bp) + GET_SIZE(HDRP(bp)) - 2*FSIZE) 
+#define SUCCP(bp)      ((char *)(bp))
+#define PREDP(bp)      ((char *)(bp) + FSIZE)
 
 /* Given block ptr bp, compute address of next and previous blocks */
-#define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - FSIZE))) //line:vm:mm:nextblkp
-#define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - 2*FSIZE))) //line:vm:mm:prevblkp
-/* $end mallocmacros */
+#define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - FSIZE))) 
+#define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - 2*FSIZE))) 
+
+/* Given block ptr bp, compute the block ptr of its successor or predecessor in the segregated list */
+#define SUCC_FREE_BLKP(bp)  (heap_startp + GET(SUCCP(bp)))
+#define PRED_FREE_BLKP(bp)  (heap_startp + GET(PREDP(bp)))
+
+/* compute the relative offset from a block pointer to start address of heap which saves space than storing a real pointer in the block */
+#define HEAP_OFFSET(bp) ((char *)(bp) - heap_startp)
 
 /*
-    My code to check user allocated memory
+    The following block of code is used to debug "garbled bytes". It checks if a pointer points to memory allocated to users, which is used to check access to user memory.
+    The variables and functions are only defined in DEBUG mode.
+    Although it contains global array, it does not count in the real memory allocator.
 */
 #ifdef DEBUG
 #define ARRAY_SIZE 2000
@@ -111,6 +122,8 @@ typedef struct user_mm {
 // defined when actually using this memory allocator
 static user_mm user_mm_array[ARRAY_SIZE];
 static int mm_array_tail = 0;
+
+/* Add the address and size of allocated memory in record array. Called when malloc() is called. */
 static void add_to_user_mm_array(char *bp, size_t size) {
     if (mm_array_tail == ARRAY_SIZE) {
         printf("too many blocks for array\n");
@@ -120,6 +133,8 @@ static void add_to_user_mm_array(char *bp, size_t size) {
     user_mm_array[mm_array_tail].size = size;
     mm_array_tail ++;
 }
+
+/* Remove a memory block in record array. Called when free() is called. */
 static void remove_from_user_mm_array(char *bp) {
     int i = 0;
     for (i = 0; i < mm_array_tail; i ++) {
@@ -131,6 +146,8 @@ static void remove_from_user_mm_array(char *bp) {
     }
     printf("error free: no corresponding block in user mm array: %p\n", bp);
 }
+
+/* Check if a pointer points to user memory */
 static void check_access_user_memory(char *ptr, int lineno) {
     int i = 0;
     for (i = 0; i < mm_array_tail; i ++) {
@@ -142,30 +159,9 @@ static void check_access_user_memory(char *ptr, int lineno) {
 #endif
 
 /* Global variables */
+static char *heap_startp = 0; /* Pointer to start of heap */
 static char *heap_listp = 0;  /* Pointer to first block */ 
-static char *heap_startp = 0;
-// static char *root = 0;
-static char *tail = 0;
-
-/* Given block ptr bp, compute address of its successor or predecessor
-   field which stores the offset of adjacent block in the explicit free list*/
-#define SUCCP(bp) ((char *)(bp))
-#define PREDP(bp) ((char *)(bp) + FSIZE)
-
-/* Given block ptr bp, compute the block ptr of its successor or predecessor
-   in the explicit free list */
-#define SUCC_FREE_BLKP(bp)  (heap_startp + GET(SUCCP(bp)))
-#define PRED_FREE_BLKP(bp)  (heap_startp + GET(PREDP(bp)))
-
-/* compute the relative offset from a block pointer to first block of heap
-   which saves space than storing a real pointer in the block */
-// #define HEAP_OFFSET(bp) ((bp) ? (((char *)(bp) - heap_listp)) : (0)) // heap_listp is 0x800000008 after first moving
-#define HEAP_OFFSET(bp) ((char *)(bp) - heap_startp)
-
-/* See if the previous block is allocated to eliminate unneccesary footer fields*/
-#define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
-/* pack a size, allocated bit of current block and allocated bit of previous block into a word */
-#define NEW_PACK(size, alloc, prev_alloc) ((size) | (alloc) | (prev_alloc << 1))
+static char *tail = 0;        /* End sentinel of all level of seglists */
 
 /* Function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
@@ -177,22 +173,22 @@ static void printblock(void *bp);
 static void checkblock(void *bp, int lineno);
 static size_t check_list(int lineno, int verbose);
 static inline void *get_root(unsigned int asize);
+
 /*
- * Initialize: return -1 on error, 0 on success.
+ * Initialize global variables and the heap including prologue block, epilogue block, header of each level of seglist and tail of all levels of seglist.
+ * Get the first free block.
  */
 int mm_init(void) {
     dbg_printf("INIT\n");
 
-    /*
-        my code to check acess to user allocated memory
-    */
+    /* debug garbled bytes */
     #ifdef DEBUG
     memset(user_mm_array, 0, ARRAY_SIZE * sizeof(user_mm));
     mm_array_tail = 0;
     #endif
 
     /* Create the initial empty heap */
-    if ((heap_startp = mem_sbrk((N_SEGLIST + 5)*FSIZE)) == (void *)-1) //line:vm:mm:begininit
+    if ((heap_startp = mem_sbrk((N_SEGLIST + 5)*FSIZE)) == (void *)-1) 
         return -1;
 
     PUT(heap_startp, 0); /* Address of tail and the SUCC field of tail */
@@ -200,19 +196,22 @@ int mm_init(void) {
     tail = heap_startp;
 
     int i = 2;
-    for (i = 2; i < N_SEGLIST + 2; i ++) { /* each header of seglist, also the SUCC field*/
-        PUT(heap_startp + (i*FSIZE), HEAP_OFFSET(tail));
+    for (i = 2; i < N_SEGLIST + 2; i ++) { /* header of each level of seglist */
+        PUT(heap_startp + (i*FSIZE), HEAP_OFFSET(tail)); // Initialize each seg_header and let them point to tail
     }
-    PUT(heap_startp + ((N_SEGLIST + 2)*FSIZE), NEW_PACK(2*FSIZE, 1, 1)); /* Prologue header */
-    PUT(heap_startp + ((N_SEGLIST + 3)*FSIZE), NEW_PACK(2*FSIZE, 1, 1)); /* Prologue footer */
-    PUT(heap_startp + ((N_SEGLIST + 4)*FSIZE), NEW_PACK(0, 1, 1)); /* Epilogue header */
+
+    PUT(heap_startp + ((N_SEGLIST + 2)*FSIZE), PACK(2*FSIZE, 1, 1)); /* Prologue block header */
+    PUT(heap_startp + ((N_SEGLIST + 3)*FSIZE), PACK(2*FSIZE, 1, 1)); /* Prologue block footer */
+    PUT(heap_startp + ((N_SEGLIST + 4)*FSIZE), PACK(0, 1, 1)); /* Epilogue block header */
     heap_listp = heap_startp + (N_SEGLIST + 3)*FSIZE;
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/FSIZE) == NULL){ 
         return -1;
     }
+
     dbg_checkheap(__LINE__, 0);
     dbg_printf("END INIT\n");
+    
     return 0;
 }
 
@@ -291,18 +290,18 @@ void free(void *bp) {
     #endif
 
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
-    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc));
-    PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc));
+    PUT(HDRP(bp), PACK(size, 0, prev_alloc));
+    PUT(FTRP(bp), PACK(size, 0, prev_alloc));
 
     void *next_bp = NEXT_BLKP(bp);
 
     // change the prev_alloc bit of next block
     unsigned int block_size = GET_SIZE(HDRP(next_bp));
     unsigned int block_alloced = GET_ALLOC(HDRP(next_bp));
-    PUT(HDRP(next_bp), NEW_PACK(block_size, block_alloced, 0));
+    PUT(HDRP(next_bp), PACK(block_size, block_alloced, 0));
     if (!block_alloced) {
         // next_block is free, the block can't be epilogue either
-        PUT(FTRP(next_bp), NEW_PACK(block_size, block_alloced, 0));
+        PUT(FTRP(next_bp), PACK(block_size, block_alloced, 0));
     }
     coalesce(bp);
     dbg_printf("END FREE\n");
@@ -434,8 +433,8 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
         bp = prev_bp;
     }
-    PUT(HDRP(bp), NEW_PACK(size, 0, 1));
-    PUT(FTRP(bp), NEW_PACK(size, 0, 1));
+    PUT(HDRP(bp), PACK(size, 0, 1));
+    PUT(FTRP(bp), PACK(size, 0, 1));
 
     void *root = get_root(size);
     PUT(SUCCP(bp), HEAP_OFFSET(SUCC_FREE_BLKP(root)));
@@ -474,11 +473,11 @@ static void *extend_heap(size_t words)
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     // printf("bp: %p, HDRP: %p, header: %x, prev_alloc: %d\n", bp, HDRP(bp), GET(HDRP(bp)), prev_alloc);
     // printf("HDRP(%p): %p\n", bp, HDRP(bp));
-    PUT(HDRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/    
-    PUT(FTRP(bp), NEW_PACK(size, 0, prev_alloc)); /* Free block footer */
+    PUT(HDRP(bp), PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/    
+    PUT(FTRP(bp), PACK(size, 0, prev_alloc)); /* Free block footer */
     
     char *epi = NEXT_BLKP(bp);
-    PUT(HDRP(epi), NEW_PACK(0, 1, 0)); /* New epilogue header */
+    PUT(HDRP(epi), PACK(0, 1, 0)); /* New epilogue header */
     /* Coalesce if the previous block was free */
     void *rt = coalesce(bp);
     dbg_printf("END EXTEND_HEAP\n");
@@ -498,19 +497,19 @@ static void place(void *bp, size_t asize)
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     if ((csize - asize) >= (4*FSIZE)) {
         dbg_printf("Case: (csize - asize) >= (4*FSIZE)\n");
-        PUT(HDRP(bp), NEW_PACK(asize, 1, prev_alloc));
+        PUT(HDRP(bp), PACK(asize, 1, prev_alloc));
         // The block is used, no need to save a footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
 
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), NEW_PACK(csize-asize, 0, 1));
-        PUT(FTRP(bp), NEW_PACK(csize-asize, 0, 1));
+        PUT(HDRP(bp), PACK(csize-asize, 0, 1));
+        PUT(FTRP(bp), PACK(csize-asize, 0, 1));
         coalesce(bp);
     }
     else {
         dbg_printf("Case: (csize - asize) < (4*FSIZE)\n");
-        PUT(HDRP(bp), NEW_PACK(csize, 1, prev_alloc));
+        PUT(HDRP(bp), PACK(csize, 1, prev_alloc));
         // The block is used, no footer
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
@@ -518,10 +517,10 @@ static void place(void *bp, size_t asize)
         bp = NEXT_BLKP(bp);
         unsigned int block_size = GET_SIZE(HDRP(bp));
         unsigned int block_alloced = GET_ALLOC(HDRP(bp));
-        PUT(HDRP(bp), NEW_PACK(block_size, block_alloced, 1));
+        PUT(HDRP(bp), PACK(block_size, block_alloced, 1));
         if (!block_alloced) {
             // block is free, the block can't be epilogue either
-            PUT(FTRP(bp), NEW_PACK(block_size, block_alloced, 1));
+            PUT(FTRP(bp), PACK(block_size, block_alloced, 1));
         }
     }
 }
