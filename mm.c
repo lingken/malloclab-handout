@@ -65,6 +65,7 @@
 # define dbg_checkheap(...)
 #endif
 
+
 /* do not change the following! */
 #ifdef DRIVER
 /* create aliases for driver tests */
@@ -203,7 +204,7 @@ static void checkheap(int lineno, int verbose);
 static void printblock(void *bp); 
 static void checkblock(void *bp, int lineno);
 static size_t check_list(int lineno, int verbose);
-static inline void *get_root(unsigned int asize);
+static void *get_root(unsigned int asize);
 
 /*
  Initialize global variables and the heap including prologue block, 
@@ -418,25 +419,26 @@ static int in_heap(const void *p) {
 static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
-
 /*
  Get the entrance to a level of seg_list according to asize
 */
-static inline void *get_root(unsigned int asize) {
+static void *get_root(unsigned int asize) {
     size_t size = (size_t)asize;
-    size_t mask = 0x80000000;
-    int k = 32;
-    for (k = 32; k > 0; k --) {
+    /* Block size falls into the highest level of seglist */
+    if (size >> (N_SEGLIST + 3)) {
+        return heap_startp + ((N_SEGLIST + 1)*FSIZE);
+    }
+    /* Mask from the bit that matters which level the block falls into */
+    size_t mask = 1 << (N_SEGLIST + 2);
+    int k = N_SEGLIST + 3;
+    for (k = N_SEGLIST + 3; k > 0; k --) {
         if (size & mask) {
             break;
         }
         mask = mask >> 1;
     }
-    if (k > N_SEGLIST + 4) {
-        // the lowest level of seglist with block size [16, 32)
-        return heap_startp + ((N_SEGLIST + 1)*FSIZE);
-    } else if (k < 5) {
-        // the highest level of seglist with block size to infinity
+    if (k < 5) {
+        // the lowest level of seglist whose block size is [16, 32)
         return heap_startp + (2*FSIZE);
     }
     return heap_startp + ((k-3)*FSIZE);
