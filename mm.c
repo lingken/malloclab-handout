@@ -96,7 +96,13 @@ block into a word */
 #define GET(p)       (*(unsigned int *)(p))
 
 #ifdef DEBUG
- #define PUT(p, val)  (*(unsigned int *)(p) = (val)); check_access_user_memory(p, __LINE__);
+ /*
+  Debug garbled bytes problem.
+  Test whether p points to memory allocated to user.
+  */
+ #define PUT(p, val)  { \
+  (*(unsigned int *)(p) = (val)); \
+  check_access_user_memory(p, __LINE__);}
 #else
  #define PUT(p, val)  (*(unsigned int *)(p) = (val))   
 #endif
