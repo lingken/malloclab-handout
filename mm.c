@@ -669,7 +669,7 @@ void checkheap(int lineno, int verbose) {
         printf("Heap (%p):\n", heap_listp);
     }
     /* Check alignment and allocation bit */
-    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))){   
+    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE)||!GET_ALLOC(HDRP(heap_listp))){   
         printf("(%d) Bad prologue header\n", lineno);
     }
     /* Check matching of header and footer */
