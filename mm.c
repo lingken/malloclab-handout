@@ -134,8 +134,8 @@ which saves space than storing a real pointer in the block */
 
 /*
     The following block of code is used to debug "garbled bytes". It checks if 
-    a pointer points to memory allocated to users, which is used to check access 
-    to user memory.
+    a pointer points to memory allocated to users, which is used to check 
+    access to user memory.
     The variables and functions are only defined in DEBUG mode.
     Although it contains global array, it does not count in the real memory 
     allocator.
@@ -462,8 +462,10 @@ static void *coalesce(void *bp)
         dbg_printf("case 2\n");
 
         void *prev_bp = PREV_BLKP(bp);
-        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
-        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), 
+            HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), 
+            HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
         
         size += GET_SIZE(HDRP(prev_bp));
         bp = prev_bp;    
@@ -473,8 +475,10 @@ static void *coalesce(void *bp)
         dbg_printf("case 3\n");
 
         void *next_bp = NEXT_BLKP(bp);
-        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
-        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
+        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), 
+            HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), 
+            HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
 
         size += GET_SIZE(HDRP(next_bp));
     } else {
@@ -483,10 +487,14 @@ static void *coalesce(void *bp)
 
         void *prev_bp = PREV_BLKP(bp);
         void *next_bp = NEXT_BLKP(bp);
-        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
-        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
-        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
-        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
+        PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), 
+            HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), 
+            HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
+        PUT(SUCCP(PRED_FREE_BLKP(next_bp)), 
+            HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
+        PUT(PREDP(SUCC_FREE_BLKP(next_bp)), 
+            HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
 
         size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
         bp = prev_bp;
@@ -661,7 +669,7 @@ void checkheap(int lineno, int verbose) {
         printf("Heap (%p):\n", heap_listp);
     }
     /* Check alignment and allocation bit */
-    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))) {   
+    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))){   
         printf("(%d) Bad prologue header\n", lineno);
     }
     /* Check matching of header and footer */
