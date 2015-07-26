@@ -4,31 +4,45 @@
       Name: Ken Ling
  Andrew ID: kling1
 
- Description: This is a dynamite memory allocator based on segregated list with immediate coalescing strategy. The footer of a normal block will be eliminated if the block is allocated.
+ Description: This is a dynamite memory allocator based on segregated list with 
+ immediate coalescing strategy. The footer of a normal block will be eliminated 
+ if the block is allocated.
 
  A nomal free block is like: |HDR|SUCC|PRED|...(space for payload)...|FTR|
  A normal allocated block is:|HDR|..............PAYLOAD..............|FTR|
- A normal free block has 4 fields, so the minimum size of a normal block is 16 bytes.
+ A normal free block has 4 fields, so the minimum size of a normal block is 16 
+ bytes.
  
- HDR -  the block header which consists of block size, allocated bit of this block and allocated bit of previous block.
- SUCC - the offset of the block's successor in seglist. Offset is calculated by HEAP_OFFSET(bp).
- PRED - the offset of the block's predecessor in seglist. Offset is calculated by HEAP_OFFSET(bp).
- FTR - the block footer which consists of block size, allocated bit of this block and allocated bit of previous block.
+ HDR -  the block header which consists of block size, allocated bit of this 
+ block and allocated bit of previous block.
+ SUCC - the offset of the block's successor in seglist. Offset is calculated 
+ by HEAP_OFFSET(bp).
+ PRED - the offset of the block's predecessor in seglist. Offset is calculated 
+ by HEAP_OFFSET(bp).
+ FTR - the block footer which consists of block size, allocated bit of this 
+ block and allocated bit of previous block.
  
- The block pointer points to SUCC field. When a block is allocated, the SUCC, PRED and FTR will be replaced by payload. If payload is larger than 12 bytes, a block will have additional space between HDR and FTR.
+ The block pointer points to SUCC field. When a block is allocated, the SUCC, 
+ PRED and FTR will be replaced by payload. If payload is larger than 12 bytes, 
+ a block will have additional space between HDR and FTR.
 
  The structure of heap is as follows: (each field costs 4 bytes)
  |tail|tail|seg_header_i|HDR|FTR|HDR|SUCC|PRED|...space...|FTR|HDR|
                         (pro    (    many normal blocks       )(epi
                         -logue)                                -logue)
 
- Tail is the end sentinel of all level of seglist. The second byte of tail immitates the PRED field which gurantees the uniform of coding.
- Seg_header_i (equals SUCC field) stores the offset of first element in i-level seglist. It stores offset of tail (0) when i-levle seglist is empty.
- Prologue block and epilogue block have 8 bytes (HDR, FTR) and 4 bytes (HDR) respectively as are shown above.
+ Tail is the end sentinel of all level of seglist. The second byte of tail 
+ immitates the PRED field which gurantees the uniform of coding.
+ Seg_header_i (equals SUCC field) stores the offset of first element in i-level 
+ seglist. It stores offset of tail (0) when i-levle seglist is empty.
+ Prologue block and epilogue block have 8 bytes (HDR, FTR) and 4 bytes (HDR) 
+ respectively as are shown above.
 
  Segregated list is organized as follows:
  seg_header_i --> block --> block --> tail
- The i-level seglist (i starts from 0) contains blocks whose size is [ 16 << i, 16 << (i+1) ) except for the last level seglist which contains block with size to infinitive.
+ The i-level seglist (i starts from 0) contains blocks whose size 
+ is [ 16 << i, 16 << (i+1) ) except for the last level seglist which 
+ contains block with size to infinity.
  */
 #include <assert.h>
 #include <stdio.h>
@@ -69,11 +83,13 @@
 /* Basic constants and macros */
 #define FSIZE       4       /* Size of each field in a block (bytes) */
 #define CHUNKSIZE  (1<<9)  /* Extend heap by this amount (bytes) */
-#define N_SEGLIST   13      /* Number of different level of seglists. Should be an odd number to guarantee alignment of heap*/
+#define N_SEGLIST   13      /* Number of different level of seglists. Should be 
+an odd number to guarantee alignment of heap*/
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
-/* pack a size, allocated bit of current block and allocated bit of previous block into a word */
+/* pack a size, allocated bit of current block and allocated bit of previous 
+block into a word */
 #define PACK(size, alloc, prev_alloc) ((size) | (alloc) | (prev_alloc << 1))
 
 /* Read and write a word at address p */
@@ -85,7 +101,8 @@
  #define PUT(p, val)  (*(unsigned int *)(p) = (val))   
 #endif
 
-/* Read the size, allocated bit block and allocated bit of previous block from address p */
+/* Read the size, allocated bit block and allocated bit of previous block from 
+address p */
 #define GET_SIZE(p)  (GET(p) & ~0x7) 
 #define GET_ALLOC(p) (GET(p) & 0x1)
 #define GET_PREV_ALLOC(p) ((GET(p) & 0x2) >> 1)
@@ -100,17 +117,22 @@
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - FSIZE))) 
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - 2*FSIZE))) 
 
-/* Given block ptr bp, compute the block ptr of its successor or predecessor in the segregated list */
+/* Given block ptr bp, compute the block ptr of its successor or predecessor in 
+the segregated list */
 #define SUCC_FREE_BLKP(bp)  (heap_startp + GET(SUCCP(bp)))
 #define PRED_FREE_BLKP(bp)  (heap_startp + GET(PREDP(bp)))
 
-/* compute the relative offset from a block pointer to start address of heap which saves space than storing a real pointer in the block */
+/* compute the relative offset from a block pointer to start address of heap 
+which saves space than storing a real pointer in the block */
 #define HEAP_OFFSET(bp) ((char *)(bp) - heap_startp)
 
 /*
-    The following block of code is used to debug "garbled bytes". It checks if a pointer points to memory allocated to users, which is used to check access to user memory.
+    The following block of code is used to debug "garbled bytes". It checks if 
+    a pointer points to memory allocated to users, which is used to check access 
+    to user memory.
     The variables and functions are only defined in DEBUG mode.
-    Although it contains global array, it does not count in the real memory allocator.
+    Although it contains global array, it does not count in the real memory 
+    allocator.
 */
 #ifdef DEBUG
 #define ARRAY_SIZE 2000
@@ -123,7 +145,8 @@ typedef struct user_mm {
 static user_mm user_mm_array[ARRAY_SIZE];
 static int mm_array_tail = 0;
 
-/* Add the address and size of allocated memory in record array. Called when malloc() is called. */
+/* Add the address and size of allocated memory in record array. Called when 
+malloc() is called. */
 static void add_to_user_mm_array(char *bp, size_t size) {
     if (mm_array_tail == ARRAY_SIZE) {
         printf("too many blocks for array\n");
@@ -151,8 +174,10 @@ static void remove_from_user_mm_array(char *bp) {
 static void check_access_user_memory(char *ptr, int lineno) {
     int i = 0;
     for (i = 0; i < mm_array_tail; i ++) {
-        if ((ptr >= user_mm_array[i].bp) && (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
-            printf("(%d) Invalid access user allocated memory, ptr: %p\n", lineno, ptr);
+        if ((ptr >= user_mm_array[i].bp) && 
+            (ptr < user_mm_array[i].bp + user_mm_array[i].size)) {
+            printf("(%d) Invalid access user allocated memory, ptr: %p\n",
+             lineno, ptr);
         }
     }
 }
@@ -175,8 +200,10 @@ static size_t check_list(int lineno, int verbose);
 static inline void *get_root(unsigned int asize);
 
 /*
- * Initialize global variables and the heap including prologue block, epilogue block, header of each level of seglist and tail of all levels of seglist.
- * Get the first free block.
+ Initialize global variables and the heap including prologue block, 
+ epilogue block, header of each level of seglist and tail of all levels 
+ of seglist.
+ Request the first free block.
  */
 int mm_init(void) {
     dbg_printf("INIT\n");
@@ -197,12 +224,16 @@ int mm_init(void) {
 
     int i = 2;
     for (i = 2; i < N_SEGLIST + 2; i ++) { /* header of each level of seglist */
-        PUT(heap_startp + (i*FSIZE), HEAP_OFFSET(tail)); // Initialize each seg_header and let them point to tail
+        // Initialize each seg_header and let them point to tail
+        PUT(heap_startp + (i*FSIZE), HEAP_OFFSET(tail)); 
     }
 
-    PUT(heap_startp + ((N_SEGLIST + 2)*FSIZE), PACK(2*FSIZE, 1, 1)); /* Prologue block header */
-    PUT(heap_startp + ((N_SEGLIST + 3)*FSIZE), PACK(2*FSIZE, 1, 1)); /* Prologue block footer */
-    PUT(heap_startp + ((N_SEGLIST + 4)*FSIZE), PACK(0, 1, 1)); /* Epilogue block header */
+    PUT(heap_startp + ((N_SEGLIST + 2)*FSIZE),
+     PACK(2*FSIZE, 1, 1)); /* Prologue block header */
+    PUT(heap_startp + ((N_SEGLIST + 3)*FSIZE),
+     PACK(2*FSIZE, 1, 1)); /* Prologue block footer */
+    PUT(heap_startp + ((N_SEGLIST + 4)*FSIZE),
+     PACK(0, 1, 1)); /* Epilogue block header */
     heap_listp = heap_startp + (N_SEGLIST + 3)*FSIZE;
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/FSIZE) == NULL){ 
@@ -216,10 +247,12 @@ int mm_init(void) {
 }
 
 /*
- * malloc
+ Allocate memory to user according to size. First get the real size of 
+ allocation by calculating aszie (adjusted block size).
  */
 void *malloc (size_t size) {
     dbg_printf("MALLOC (size: %ld)\n", size);
+
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     size_t tmp;
@@ -240,15 +273,17 @@ void *malloc (size_t size) {
         asize = 4*FSIZE;
     }
     else{
-        tmp = (size + (FSIZE - 1)) / FSIZE; // real payload
+        /* tmp is the number of fields needed for payload */
+        tmp = (size + (FSIZE - 1)) / FSIZE;
         asize = (tmp & 0x1 ? (tmp + 1) : (tmp + 2)) * FSIZE;
     }
 
-    /* Search the free list for a fit */
-    if ((bp = find_fit(asize)) != NULL) {  //line:vm:mm:findfitcall
-        place(bp, asize);                  //line:vm:mm:findfitplace
+    /* Search the seglist list for a fit */
+    if ((bp = find_fit(asize)) != NULL) {
+        place(bp, asize);
         dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (find_fit succeed)\n");
+        /* debug garbled bytes */
         #ifdef DEBUG
         add_to_user_mm_array(bp, size);
         #endif
@@ -256,15 +291,16 @@ void *malloc (size_t size) {
     }
 
     /* No fit found. Get more memory and place the block */
-    extendsize = MAX(asize,CHUNKSIZE);                 //line:vm:mm:growheap1
+    extendsize = MAX(asize,CHUNKSIZE);
     if ((bp = extend_heap(extendsize/FSIZE)) == NULL) { 
         dbg_checkheap(__LINE__, 0);
         dbg_printf("END MALLOC (extend_heap Fails)\n");
-        return NULL;                                  //line:vm:mm:growheap2
+        return NULL;
     }
-    place(bp, asize);                                 //line:vm:mm:growheap3
+    place(bp, asize);
     dbg_checkheap(__LINE__, 0);
     dbg_printf("END MALLOC (extend_heap)\n");
+    /* debug garbled bytes */
     #ifdef DEBUG
     add_to_user_mm_array(bp, size);
     #endif
@@ -272,12 +308,14 @@ void *malloc (size_t size) {
 }
 
 /*
- * free
+ Free the memory block pointed by bp.
  */
 void free(void *bp) {
     dbg_printf("FREE\n");
-    if (bp == 0) 
+
+    if (bp == 0) {
         return;
+    }
 
     size_t size = GET_SIZE(HDRP(bp));
 
@@ -285,30 +323,32 @@ void free(void *bp) {
         mm_init();
     }
 
+    /* debug garbled bytes */
     #ifdef DEBUG
     remove_from_user_mm_array(bp);
     #endif
-
+    /* Change the state of this block to free */
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 0, prev_alloc));
     PUT(FTRP(bp), PACK(size, 0, prev_alloc));
 
     void *next_bp = NEXT_BLKP(bp);
 
-    // change the prev_alloc bit of next block
+    /* change the prev_allocated bit of next block */
     unsigned int block_size = GET_SIZE(HDRP(next_bp));
     unsigned int block_alloced = GET_ALLOC(HDRP(next_bp));
     PUT(HDRP(next_bp), PACK(block_size, block_alloced, 0));
     if (!block_alloced) {
-        // next_block is free, the block can't be epilogue either
+        /*the next block is free, so it has a footer */
         PUT(FTRP(next_bp), PACK(block_size, block_alloced, 0));
     }
     coalesce(bp);
+
     dbg_printf("END FREE\n");
 }
 
 /*
- * realloc - you may want to look at mm-naive.c
+ Reallocated the memory block pointed by ptr to a block of size bytes
  */
 void *realloc(void *ptr, size_t size) {
     size_t oldsize;
@@ -344,9 +384,7 @@ void *realloc(void *ptr, size_t size) {
 }
 
 /*
- * calloc - you may want to look at mm-naive.c
- * This function is not tested by mdriver, but it is
- * needed to run the traces.
+ malloc with content of memory initialized to zero
  */
 void *calloc (size_t nmemb, size_t size) {
     size_t bytes = nmemb * size;
@@ -362,21 +400,22 @@ void *calloc (size_t nmemb, size_t size) {
 }
 
 /*
- * Return whether the pointer is in the heap.
- * May be useful for debugging.
+ Return whether the pointer is in the heap.
  */
 static int in_heap(const void *p) {
     return p <= mem_heap_hi() && p >= mem_heap_lo();
 }
 
 /*
- * Return whether the pointer is aligned.
- * May be useful for debugging.
+ Return whether the pointer is aligned.
  */
 static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
 
+/*
+ Get the entrance to a level of seg_list according to asize
+*/
 static inline void *get_root(unsigned int asize) {
     size_t size = (size_t)asize;
     size_t mask = 0x80000000;
@@ -388,25 +427,34 @@ static inline void *get_root(unsigned int asize) {
         mask = mask >> 1;
     }
     if (k > N_SEGLIST + 4) {
+        // the lowest level of seglist with block size [16, 32)
         return heap_startp + ((N_SEGLIST + 1)*FSIZE);
     } else if (k < 5) {
+        // the highest level of seglist with block size to infinity
         return heap_startp + (2*FSIZE);
     }
     return heap_startp + ((k-3)*FSIZE);
 
 }
 
+/*
+ If a free block has adjacent free blocks, then coalesce them together.
+*/
 static void *coalesce(void *bp) 
 {
     dbg_printf("COALESCE\n");
+
     size_t prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     unsigned int size = GET_SIZE(HDRP(bp));
     
-    if (prev_alloc && next_alloc) { // Case 1
+    if (prev_alloc && next_alloc) {
+        /* Case 1 - no adjacent free blocks */
         dbg_printf("case 1\n");
-    } else if (!prev_alloc && next_alloc) { // Case 2 before free, after alloced
+    } else if (!prev_alloc && next_alloc) {
+        /* Case 2 - previous block is free, next block is allocated */
         dbg_printf("case 2\n");
+
         void *prev_bp = PREV_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(prev_bp)), HEAP_OFFSET(PRED_FREE_BLKP(prev_bp)));
@@ -414,15 +462,19 @@ static void *coalesce(void *bp)
         size += GET_SIZE(HDRP(prev_bp));
         bp = prev_bp;    
         
-    } else if (prev_alloc && !next_alloc) { // Case 3 before alloc, after free
+    } else if (prev_alloc && !next_alloc) {
+        /* Case 3 - previous block is allocated, next block is free */
         dbg_printf("case 3\n");
+
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(next_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(next_bp)));
         PUT(PREDP(SUCC_FREE_BLKP(next_bp)), HEAP_OFFSET(PRED_FREE_BLKP(next_bp)));
 
         size += GET_SIZE(HDRP(next_bp));
-    } else { // Case 4 before free, after free
+    } else {
+        /* Case 4 - previous block and next block are both free */
         dbg_printf("case 4\n");
+
         void *prev_bp = PREV_BLKP(bp);
         void *next_bp = NEXT_BLKP(bp);
         PUT(SUCCP(PRED_FREE_BLKP(prev_bp)), HEAP_OFFSET(SUCC_FREE_BLKP(prev_bp)));
@@ -435,7 +487,7 @@ static void *coalesce(void *bp)
     }
     PUT(HDRP(bp), PACK(size, 0, 1));
     PUT(FTRP(bp), PACK(size, 0, 1));
-
+    /* Link the coalesced block back into seglist */
     void *root = get_root(size);
     PUT(SUCCP(bp), HEAP_OFFSET(SUCC_FREE_BLKP(root)));
     PUT(PREDP(bp), HEAP_OFFSET(root));
@@ -448,16 +500,12 @@ static void *coalesce(void *bp)
 }
 
 /* 
- * The remaining routines are internal helper routines 
- */
-
-/* 
- * extend_heap - Extend heap with free block and return its block pointer
+ Extend heap with free block and return its block pointer
  */
 static void *extend_heap(size_t words) 
 {
     dbg_printf("EXTEND_HEAP\n");
-    // the minimum size of a block is 16 bytes (HDR, SUCC, PRED, FTR)
+    /* the minimum size of a block is 16 bytes (HDR, SUCC, PRED, FTR) */
     if (words < 4) {
         words = 4;
     }
@@ -465,43 +513,40 @@ static void *extend_heap(size_t words)
     size_t size;
 
     /* Allocate an even number of words to maintain alignment */
-    size = (words % 2) ? (words+1) * FSIZE : words * FSIZE; //line:vm:mm:beginextend
+    size = (words % 2) ? (words+1) * FSIZE : words * FSIZE;
     if ((long)(bp = mem_sbrk(size)) == -1)  
-        return NULL;                                        //line:vm:mm:endextend
+        return NULL;
 
     /* Initialize free block header/footer and the epilogue header */
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
-    // printf("bp: %p, HDRP: %p, header: %x, prev_alloc: %d\n", bp, HDRP(bp), GET(HDRP(bp)), prev_alloc);
-    // printf("HDRP(%p): %p\n", bp, HDRP(bp));
-    PUT(HDRP(bp), PACK(size, 0, prev_alloc)); /* Free block header and overwrite the original tail*/    
+    PUT(HDRP(bp), PACK(size, 0, prev_alloc)); /* Free block header */    
     PUT(FTRP(bp), PACK(size, 0, prev_alloc)); /* Free block footer */
     
     char *epi = NEXT_BLKP(bp);
     PUT(HDRP(epi), PACK(0, 1, 0)); /* New epilogue header */
     /* Coalesce if the previous block was free */
     void *rt = coalesce(bp);
+
     dbg_printf("END EXTEND_HEAP\n");
-    return rt;                                          //line:vm:mm:returnblock
+    return rt;
 }
 
 /* 
- * place - Place block of asize bytes at start of free block bp 
- *         and split if remainder would be at least minimum block size
+ Place block of asize bytes at start of free block bp 
+ and split if remainder would be at least minimum block size
  */
-/* $begin mmplace */
-/* $begin mmplace-proto */
 static void place(void *bp, size_t asize)
-/* $end mmplace-proto */
 {
     size_t csize = GET_SIZE(HDRP(bp));   
     unsigned int prev_alloc = GET_PREV_ALLOC(HDRP(bp));
     if ((csize - asize) >= (4*FSIZE)) {
         dbg_printf("Case: (csize - asize) >= (4*FSIZE)\n");
+
         PUT(HDRP(bp), PACK(asize, 1, prev_alloc));
-        // The block is used, no need to save a footer
+        /* The block is allocated. No footer */
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
-
+        /* The splitted free block */
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0, 1));
         PUT(FTRP(bp), PACK(csize-asize, 0, 1));
@@ -509,33 +554,35 @@ static void place(void *bp, size_t asize)
     }
     else {
         dbg_printf("Case: (csize - asize) < (4*FSIZE)\n");
+
         PUT(HDRP(bp), PACK(csize, 1, prev_alloc));
-        // The block is used, no footer
+        /* The block is allocated. No footer */
         PUT(SUCCP(PRED_FREE_BLKP(bp)), HEAP_OFFSET(SUCC_FREE_BLKP(bp)));
         PUT(PREDP(SUCC_FREE_BLKP(bp)), HEAP_OFFSET(PRED_FREE_BLKP(bp)));
-
+        /* Change the prev_allocated bit of next block */
         bp = NEXT_BLKP(bp);
         unsigned int block_size = GET_SIZE(HDRP(bp));
         unsigned int block_alloced = GET_ALLOC(HDRP(bp));
         PUT(HDRP(bp), PACK(block_size, block_alloced, 1));
         if (!block_alloced) {
-            // block is free, the block can't be epilogue either
+            /* This block is free, so it has a footer */
             PUT(FTRP(bp), PACK(block_size, block_alloced, 1));
         }
     }
 }
 
-/* $end mmplace */
-
 /* 
- * find_fit - Find a fit for a block with asize bytes 
+ Find a fit for a block with asize bytes in the seglist.
+ It starts searching from the lowest possible level of seglish which contains
+ block of asize. If no free block, then move to the higher level.
  */
 
 static void *find_fit(size_t asize)
 {
     /* First-fit search */
     char *root = get_root(asize);
-    while (root != (heap_startp + ((N_SEGLIST + 2)*FSIZE))){
+    while (root != (heap_startp + ((N_SEGLIST + 2)*FSIZE))) {
+        /* Search in a level of seglist */
         void *bp = SUCC_FREE_BLKP(root);
         while (bp != tail) {
             if (GET_SIZE(HDRP(bp)) >= asize) {
@@ -543,11 +590,15 @@ static void *find_fit(size_t asize)
             }
             bp = SUCC_FREE_BLKP(bp);
         }
+        /* Move to the higher level */
         root = root + FSIZE;
     }
     return NULL; /* No fit */
 }
 
+/*
+ Print out the information of a block for debugging
+ */
 static void printblock(void *bp) 
 {
     size_t hsize, halloc, hprevalloc, fsize, falloc, fprevalloc;
@@ -560,14 +611,18 @@ static void printblock(void *bp)
     fprevalloc = GET_PREV_ALLOC(FTRP(bp));
 
     if (hsize == 0) {
+        /* Epilogue */
         printf("%p: EOL   :[%ld:%ld:%ld]\n", bp, hsize, halloc, hprevalloc);
         return;
     }
  
     if (halloc) {
+        /* Allocated block with no footer */
         printf("%p: header: [%ld:%ld:%ld]\n", bp, hsize, halloc, hprevalloc);
     } else {
-        printf("%p: header: [%ld:%ld:%ld] footer: [%ld:%ld:%ld] PRED: %x, SUCC: %x\n",
+        /* Free block with footer */
+        printf("%p: header: [%ld:%ld:%ld] footer: [%ld:%ld:%ld] \
+         PRED: %x, SUCC: %x\n",
             bp,
             hsize, halloc, hprevalloc, fsize, falloc, fprevalloc,
             GET(PREDP(bp)), GET(SUCCP(bp)));
@@ -575,28 +630,38 @@ static void printblock(void *bp)
 }
 
 /*
- * mm_checkheap
+ Heapcheck function that will be automatically called in driver with -d.
  */
 void mm_checkheap(int lineno) {
     checkheap(lineno, 1);
 }
 
+/*
+ Real implementation of heapcheck function
+ */
 void checkheap(int lineno, int verbose) {
     if (verbose){
         if (lineno == 1) {
+            /* Called by driver */
             printf("============================================\n");
         } else {
+            /* Called manually */
             printf("********My Call*********\n");
         }
     }
 
     /* check prologue block */
-    if (verbose)
+    if (verbose) {
         printf("Heap (%p):\n", heap_listp);
-    if ((GET_SIZE(HDRP(heap_listp)) != 2*FSIZE) || !GET_ALLOC(HDRP(heap_listp)))
+    }
+    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))) {
         printf("(%d) Bad prologue header\n", lineno);
+    }
     if (GET(HDRP(heap_listp)) != GET(FTRP(heap_listp))) {
         printf("(%d) Bad prologue header does not match footer\n\n", lineno);
+    }
+    if (!in_heap(heap_listp)) {
+        printf("(%d) Outside heap boundary\n", lineno);
     }
     size_t hsize, halloc, hprevalloc, fsize, falloc, fprevalloc;
     hsize = GET_SIZE(HDRP(heap_listp));
@@ -610,7 +675,6 @@ void checkheap(int lineno, int verbose) {
             hsize, halloc, hprevalloc,
             fsize, falloc, fprevalloc);
 
-    // checkblock(heap_listp, lineno);
     size_t free_blocks = 0;
     size_t prev_alloc = 1;
     char *bp;
