@@ -650,16 +650,19 @@ void checkheap(int lineno, int verbose) {
         }
     }
 
-    /* check prologue block */
+    /* Check prologue block */
     if (verbose) {
         printf("Heap (%p):\n", heap_listp);
     }
-    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))) {
+    /* Check alignment and allocation bit */
+    if ((GET_SIZE(HDRP(heap_listp))!=2*FSIZE) || !GET_ALLOC(HDRP(heap_listp))) {   
         printf("(%d) Bad prologue header\n", lineno);
     }
-    if (GET(HDRP(heap_listp)) != GET(FTRP(heap_listp))) {
+    /* Check matching of header and footer */
+    if (GET(HDRP(heap_listp)) != GET(FTRP(heap_listp))) { 
         printf("(%d) Bad prologue header does not match footer\n\n", lineno);
     }
+    /* Check heap boundary */
     if (!in_heap(heap_listp)) {
         printf("(%d) Outside heap boundary\n", lineno);
     }
@@ -675,18 +678,24 @@ void checkheap(int lineno, int verbose) {
             hsize, halloc, hprevalloc,
             fsize, falloc, fprevalloc);
 
-    size_t free_blocks = 0;
+    size_t free_blocks = 0; // number of free blocks in heap
     size_t prev_alloc = 1;
     char *bp;
-    for (bp = NEXT_BLKP(heap_listp); GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        if (verbose) 
+    for (bp=NEXT_BLKP(heap_listp); GET_SIZE(HDRP(bp)) > 0; bp=NEXT_BLKP(bp)) {
+        if (verbose) {
             printblock(bp);
-        checkblock(bp, lineno);
-        if (GET_PREV_ALLOC(HDRP(bp)) != prev_alloc) {
-            printf("(%d) Error: %p prev_alloc bit: %d, alloc_bit of prev blk: %zu\n", lineno, bp, GET_PREV_ALLOC(HDRP(bp)), prev_alloc);
         }
+        checkblock(bp, lineno);
+        /* Check previous allocate bit consistency */
+        if (GET_PREV_ALLOC(HDRP(bp)) != prev_alloc) {
+            printf("(%d) Error: %p prev_alloc bit: %d, \
+                alloc_bit of prev blk: %zu\n", 
+                lineno, bp, GET_PREV_ALLOC(HDRP(bp)), prev_alloc);
+        }
+        /* Check coalescing: whether consecutive free blocks exist */
         if (prev_alloc == 0 && GET_ALLOC(HDRP(bp)) == 0) {
-            printf("(%d) Error: %p two consecutive free blocks in heap\n", lineno, bp);
+            printf("(%d) Error: %p two consecutive free blocks in heap\n", 
+                lineno, bp);
         }
         if (!GET_ALLOC(HDRP(bp))) {
             free_blocks ++;
@@ -694,81 +703,107 @@ void checkheap(int lineno, int verbose) {
         prev_alloc = GET_ALLOC(HDRP(bp));
     }
 
-    /* check epilogue block */
-    if (verbose)
+    /* Check epilogue block */
+    if (verbose) {
         printblock(bp);
+    }
+    /* Check alignment and allocation bit */
     if ((GET_SIZE(HDRP(bp)) != 0) || !(GET_ALLOC(HDRP(bp))))
         printf("(%d) Bad epilogue header\n", lineno);
-
+    /* Check the segregated list */
     size_t free_blocks_in_list = check_list(lineno, verbose);
+    /* The number of free blocks in heap and in seglist do not match */
     if (free_blocks != free_blocks_in_list) {
-        printf("(%d) free blocks: %ld, free blocks in list: %ld\n", lineno, free_blocks, free_blocks_in_list);
+        printf(
+            "(%d) free blocks: %ld, free blocks in list: %ld\n", 
+            lineno, free_blocks, free_blocks_in_list);
+    }
+
+    /* Check heap boundary */
+    if (!in_heap(bp)) {
+        printf("(%d) Outside heap boundary\n", lineno);
     }
 }
 
-/* for all blocks except for epilogue block */
+/* Check a specific block */
 static void checkblock(void *bp, int lineno) 
 {
-    /* check block's alignment */
-    if (!aligned(bp))
+    /* Check block's alignment */
+    if (!aligned(bp)) {
         printf("(%d) Error: %p is not doubleword aligned\n", lineno, bp);
-    // if (GET(HDRP(bp)) != GET(FTRP(bp)))
-        // printf("Error: header does not match footer\n");
-    if ((bp != heap_listp) && GET_SIZE(HDRP(bp)) < 4 * FSIZE) {
-        printf("(%d) Error: %p block size is smaller than minimum size\n", lineno, bp);
     }
+    /* Check minimum size of a block */
+    if ((bp != heap_listp) && GET_SIZE(HDRP(bp)) < 4 * FSIZE) {
+        printf("(%d) Error: %p block size is smaller than minimum size\n", 
+            lineno, bp);
+    }
+    /* Check matching of header and footer */
     if (!GET_ALLOC(HDRP(bp))) {
-        // this is a free block, has its footer
+        // This is a free block and has its footer
         if (GET(HDRP(bp)) != GET(FTRP(bp))){
             printf("(%d) Error: header does not match footer\n", lineno);
         }
     }
 }
 
+/*
+ Check the free list (segregated list)
+ Return the number of free blocks in seglist.
+ */
 static size_t check_list(int lineno, int verbose) {
     if (verbose) {
         printf("(%d) Segregated list:\n", lineno);
     }
-    size_t free_blocks_in_list = 0;
 
+    size_t free_blocks_in_list = 0;
+    
     int i = 0;
     for (i = 0; i < N_SEGLIST; i ++) {
+        /* Check a specific level of seglist */
         void *root = heap_startp + ((i + 2)*FSIZE);
         unsigned int level_size = (1 << (4+i));
         printf("root (size %u): %p\n", level_size, root);
 
         void *ptr = SUCC_FREE_BLKP(root);
         while (ptr != tail) {
+            /* Cound free blocks in seglist */
             free_blocks_in_list ++;
             if (verbose) {
                 printblock(ptr);
             }
+            /* Check whether the block is outside the heap boundary,
+            whether list pointers points between mem_heap_lo and_mem heap_high
+            */
             if (!in_heap(ptr)) {
                 printf("(%d) %p out of heap\n", lineno, ptr);
             }
-
+            /* Check the consistency of pointers */
             if (SUCC_FREE_BLKP(PRED_FREE_BLKP(ptr)) != ptr) {
                 printf("(%d) %p inconsistent ptr->pred->succ\n", lineno, ptr);
             }
-            if ((SUCC_FREE_BLKP(ptr) != tail) && PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
+            /* Check the consistency of pointers */
+            if ((SUCC_FREE_BLKP(ptr) != tail) && 
+                PRED_FREE_BLKP(SUCC_FREE_BLKP(ptr)) != ptr) {
                 printf("(%d) %p inconsistent ptr->succ->pred\n", lineno, ptr);
             }
+            /* Check whether a blocks falls into the right level of seglist */
             unsigned int block_size = GET_SIZE(HDRP(ptr));
-            if (i != N_SEGLIST - 1) {
+            if (i != N_SEGLIST - 1) { // not the higest level, has upper bound
                 if (block_size < level_size || block_size >= 2 * level_size) {
-                    printf("(%d) %p with size of %u in the wrong list %u\n", lineno, ptr, block_size, level_size);
+                    printf("(%d) %p with size of %u in the wrong list %u\n", 
+                        lineno, ptr, block_size, level_size);
                 }
-            } else {
+            } else { // highest level, no upper bound for block size
                 if (block_size < level_size) {
-                    printf("(%d) %p with size of %u in the wrong list %u\n", lineno, ptr, block_size, level_size);
+                    printf("(%d) %p with size of %u in the wrong list %u\n", 
+                        lineno, ptr, block_size, level_size);
                 }
             }
             ptr = SUCC_FREE_BLKP(ptr);
         }
     }
-    
 
-    if (verbose) {
+    if (verbose) { // Tail sentinel
         printf("all tail: %p, pred: %p\n", tail, PRED_FREE_BLKP(tail));
         printf("(%d) END check list\n", lineno);
     }
