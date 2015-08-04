@@ -20,6 +20,7 @@ void process_request(int fd);
 void read_requesthdrs(rio_t *rp, char request[MAXBUF]);
 void clienterror(int fd, char *cause, char *errnum, 
          char *shortmsg, char *longmsg);
+void get_content(char request[MAXBUF], int client_fd);
 
 int main(int argc, char **argv)
 {
@@ -71,6 +72,27 @@ void process_request(int client_fd)
     read_requesthdrs(&rio, request);
     printf("FINAL:\n");
     printf("%s\n", request);
+
+    get_content(request, client_fd);
+}
+
+void get_content(char request[MAXBUF], int client_fd) {
+    printf("THIS IS REQUEST:\n%s", request);
+    int server_fd;
+    rio_t rio;
+    server_fd = Open_clientfd("www.baidu.com", "80");
+
+    Rio_readinitb(&rio, server_fd);
+    Rio_writen(server_fd, request, strlen(request));
+
+    char body[MAXLINE];
+    int n = 0;
+    while ((n = Rio_readlineb(&rio, body, MAXLINE)) != 0) {
+        printf("%s\n", body);
+    }
+    // Rio_readlineb(&rio, body, MAXBUF);
+    // printf("CONTENT:\n%s\n", body);
+    // Fputs(body, stdout);
 }
 
 void read_requesthdrs(rio_t *rp, char request[MAXBUF]) 
@@ -92,10 +114,11 @@ void read_requesthdrs(rio_t *rp, char request[MAXBUF])
         printf("%s", buf);
     }
     sprintf(request, "%s%s", request, user_agent_hdr);
-    sprintf(request, "%s%s", request, accept_hdr);
-    sprintf(request, "%s%s", request, accept_encoding_hdr);
-    sprintf(request, "%s%s", request, connection_hdr);
-    sprintf(request, "%s%s", request, proxy_connection_hdr);
+    // sprintf(request, "%s%s", request, accept_hdr);
+    // sprintf(request, "%s%s", request, accept_encoding_hdr);
+    // sprintf(request, "%s%s", request, connection_hdr);
+    // sprintf(request, "%s%s", request, proxy_connection_hdr);
+    sprintf(request, "%s\r\n", request);
     return;
 }
 
