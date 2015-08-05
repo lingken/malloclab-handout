@@ -3,6 +3,8 @@
   Andrew ID: kling1
 */
 #include <stdio.h>
+#include <regex.h>
+#include <string.h>
 #include "csapp.h"
 
 /* Recommended max cache and object sizes */
@@ -15,12 +17,24 @@ static const char *accept_hdr = "Accept: text/html,application/xhtml+xml,applica
 static const char *accept_encoding_hdr = "Accept-Encoding: gzip, deflate\r\n";
 static const char *connection_hdr = "Connection: close\r\n";
 static const char *proxy_connection_hdr = "Proxy-Connection: close\r\n";
+/* Pattern for regular expression */
+static const char *pattern_host = "http://([^:/]*)(:\\d+)?/?.*";
+static const char *pattern_port = "http://.*:([^/]*)";
+static const char *pattern_urn = "http://[^/]*/(.+)";
+
+regex_t reg_host;
+regex_t reg_port;
+regex_t reg_urn;
+const int nmatch = 10;
 
 void process_request(int fd);
 void read_requesthdrs(rio_t *rp, char request[MAXBUF]);
 void clienterror(int fd, char *cause, char *errnum, 
          char *shortmsg, char *longmsg);
-void get_content(char request[MAXBUF], int client_fd);
+void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE]);
+int parse_uri(char uri[MAXLINE], char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]);
+void initialize_regex();
+void free_regex();
 
 int main(int argc, char **argv)
 {
@@ -34,7 +48,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <port>\n", argv[0]);
         exit(1);
     }
-
+    initialize_regex();
     listenfd = Open_listenfd(argv[1]);
     while (1) {
     clientlen = sizeof(clientaddr);
@@ -52,6 +66,7 @@ void process_request(int client_fd)
 {
     int server_fd;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char host[MAXLINE], port[MAXLINE], urn[MAXLINE];
     char request[MAXBUF];
     rio_t rio;
 
@@ -68,19 +83,23 @@ void process_request(int client_fd)
         return;
     }
     sprintf(request, "%s %s HTTP/1.0\r\n", method, uri);
+    
+    parse_uri(uri, host, port, urn);
 
     read_requesthdrs(&rio, request);
     printf("FINAL:\n");
     printf("%s\n", request);
 
-    get_content(request, client_fd);
+    get_content(request, client_fd, host, port);
 }
 
-void get_content(char request[MAXBUF], int client_fd) {
+void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE]) {
     printf("THIS IS REQUEST:\n%s", request);
     int server_fd;
     rio_t rio;
-    server_fd = Open_clientfd("www.baidu.com", "80");
+    printf("MY HOST: %s\n", host);
+    printf("MY PORT: %s\n", port);
+    server_fd = Open_clientfd(host, port);
 
     Rio_readinitb(&rio, server_fd);
     Rio_writen(server_fd, request, strlen(request));
@@ -88,11 +107,44 @@ void get_content(char request[MAXBUF], int client_fd) {
     char body[MAXLINE];
     int n = 0;
     while ((n = Rio_readlineb(&rio, body, MAXLINE)) != 0) {
-        printf("%s\n", body);
+        // printf("%s\n", body);
+        Rio_writen(client_fd, body, n);
     }
     // Rio_readlineb(&rio, body, MAXBUF);
     // printf("CONTENT:\n%s\n", body);
     // Fputs(body, stdout);
+}
+
+int parse_uri(char uri[MAXLINE], char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]) {
+    printf("PARSE URI\n");
+    regmatch_t pm[10];
+    printf("%d %d %d\n", sizeof(host), sizeof(port), sizeof(urn));
+    memset(host, 0, MAXLINE);
+    memset(port, 0, MAXLINE);
+    memset(urn, 0, MAXLINE);
+
+    if (regexec(&reg_host, uri, nmatch, pm, 0) == 0) {
+        int n_host = (int)(pm[1].rm_eo - pm[1].rm_so);
+        printf("n_host: %d\n", n_host);
+        strncpy(host, uri + pm[1].rm_so, n_host);
+    } else {
+        return -1;
+    }
+    if (regexec(&reg_port, uri, nmatch, pm, 0) == 0) {
+        int n_port = (int)(pm[1].rm_eo - pm[1].rm_so);
+        strncpy(port, uri + pm[1].rm_so, n_port);
+    } else {
+        strncpy(port, "80", 2);
+    }
+    if (regexec(&reg_urn, uri, nmatch, pm, 0) == 0) {
+        int n_urn = (int)(pm[1].rm_eo - pm[1].rm_so);
+        strncpy(urn, uri + pm[1].rm_so, n_urn);
+    }
+    printf("uri: %s\n", uri);
+    printf("host: %s\n", host);
+    printf("port: %s\n", port);
+    printf("urn: %s\n", urn);
+    return 0;
 }
 
 void read_requesthdrs(rio_t *rp, char request[MAXBUF]) 
@@ -118,6 +170,7 @@ void read_requesthdrs(rio_t *rp, char request[MAXBUF])
     // sprintf(request, "%s%s", request, accept_encoding_hdr);
     // sprintf(request, "%s%s", request, connection_hdr);
     // sprintf(request, "%s%s", request, proxy_connection_hdr);
+    /* end the header of GET method */
     sprintf(request, "%s\r\n", request);
     return;
 }
@@ -142,4 +195,16 @@ void clienterror(int fd, char *cause, char *errnum,
     sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
     Rio_writen(fd, buf, strlen(buf));
     Rio_writen(fd, body, strlen(body));
+}
+
+void initialize_regex() {
+    regcomp(&reg_host, pattern_host, REG_EXTENDED | REG_ICASE);
+    regcomp(&reg_port, pattern_port, REG_EXTENDED | REG_ICASE);
+    regcomp(&reg_urn, pattern_urn, REG_EXTENDED | REG_ICASE);
+}
+
+void free_regex() {
+    regfree(&reg_host);
+    regfree(&reg_port);
+    regfree(&reg_urn);
 }
