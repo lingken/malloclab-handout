@@ -35,13 +35,15 @@ void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char p
 int parse_uri(char uri[MAXLINE], char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]);
 void initialize_regex();
 void free_regex();
+void *thread(void *vargp);
 
 int main(int argc, char **argv)
 {
-    int listenfd, client_connfd;
+    int listenfd, *client_connfd;
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
+    pthread_t tid;
 
     /* Check command line args */
     if (argc != 2) {
@@ -51,15 +53,26 @@ int main(int argc, char **argv)
     initialize_regex();
     listenfd = Open_listenfd(argv[1]);
     while (1) {
-    clientlen = sizeof(clientaddr);
-    client_connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        Getnameinfo((SA *) &clientaddr, clientlen, hostname, MAXLINE, 
-                    port, MAXLINE, 0);
+        clientlen = sizeof(clientaddr);
+        client_connfd = malloc(sizeof(int));
+        *client_connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+            Getnameinfo((SA *) &clientaddr, clientlen, hostname, MAXLINE, 
+                        port, MAXLINE, 0);
         printf("Accepted connection from (%s, %s)\n", hostname, port);
-    process_request(client_connfd);
-    Close(client_connfd);
+        pthread_create(&tid, NULL, thread, client_connfd);
+        // process_request(client_connfd);
+        // Close(client_connfd);
     }
     return 0;
+}
+
+void *thread(void *vargp) {
+    int client_connfd = *((int *)vargp);
+    pthread_detach(pthread_self());
+    free(vargp);
+    process_request(client_connfd);
+    close(client_connfd);
+    return NULL;
 }
 
 void process_request(int client_fd) 
@@ -82,7 +95,7 @@ void process_request(int client_fd)
                     "Tiny does not implement this method");
         return;
     }
-    
+
     parse_uri(uri, host, port, urn);
     sprintf(request, "%s /%s HTTP/1.0\r\n", method, urn);
 
