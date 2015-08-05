@@ -82,9 +82,9 @@ void process_request(int client_fd)
                     "Tiny does not implement this method");
         return;
     }
-    sprintf(request, "%s %s HTTP/1.0\r\n", method, uri);
     
     parse_uri(uri, host, port, urn);
+    sprintf(request, "%s /%s HTTP/1.0\r\n", method, urn);
 
     read_requesthdrs(&rio, request);
     printf("FINAL:\n");
