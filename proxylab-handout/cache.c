@@ -44,6 +44,7 @@ Cache_Block *delete_elem(Cache_Block *elem) {
 }
 /* Initialize the parameters of a cache block */
 void initialize_cache_block(Cache_Block *cache_block, int size, char *response, char *URN, char *Host) {
+    sem_init(&cache_block->mutex, 0, 1);
     cache_block->size = size;
     strncpy(cache_block->URN, URN, MAXLINE);
     strncpy(cache_block->Host, Host, MAXLINE);
@@ -54,7 +55,9 @@ void initialize_cache_block(Cache_Block *cache_block, int size, char *response, 
 }
 /* Update the timestamp of a block when being read or written */
 void refresh(Cache_Block *cache_block) {
+    P(&cache_block->mutex);
     cache_block->timestamp = time(NULL);
+    V(&cache_block->mutex);
 }
 /* Free the content and cache block itself */
 void free_cache_block(Cache_Block *cache_block) {
@@ -68,6 +71,10 @@ void free_cache_block(Cache_Block *cache_block) {
 
 /* Initialize the parameters of a cache */
 void initialize_cache(Cache *cache, maxsize) {
+    sem_init(&cache->mutex, 0, 1);
+    sem_init(&cache->w, 0, 1);
+    cache->readers = 0;
+
     cache->max_size = maxsize;
     cache->available_size = maxsize;
     cache->root = calloc(sizeof(Cache_Block));
@@ -90,16 +97,33 @@ Cache_Block *find_least_recent_used(Cache *cache) {
     return rt;
 }
 /* 
-    Find and return the content in cache according to URN and Host. 
+    Find and return a copy of content in cache according to URN and Host.
+    Return the copy will avoid race conditions. 
     Return NULL if the content is not cached
 */
 char *read_from_cache(Cache *cache, char *URN, char *Host) {
+    P(&cache->mutex);
+    cache->readers ++;
+    if (cache->readers == 1) {
+        P(&cache->w);
+    }
+    V(&cache->mutex);
+
     char *response = NULL;
     Cache_Block *ptr = find_elem(cache->root, URN, Host);
     if (ptr) { // the content is cached
-        response = ptr->response;
+        response = calloc(ptr->size);
+        // response = ptr->response;
+        memcpy(response, ptr->response, ptr->size);
         refresh(ptr);
     }
+
+    P(&cache->mutex);
+    cache->readers --;
+    if (cache->readers == 0) {
+        V(&cache->w);
+    }
+    V(&cache->mutex);
     return response;
 }
 /*
@@ -108,6 +132,8 @@ char *read_from_cache(Cache *cache, char *URN, char *Host) {
     if space is not enough.
 */
 void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Host) {
+    P(&cache->w);
+
     if (size > cache->max_size) { // Content is too large to be cached
         return;
     }
@@ -122,6 +148,8 @@ void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Hos
     initialize_cache_block(new_block, size, response, URN, Host);
     add_elem(cache->root, new_block);
     cache->available_size -= size;
+    
+    V(&cache->w);
 }
 
 void free_cache(Cache *cache) {

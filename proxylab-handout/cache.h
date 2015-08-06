@@ -1,6 +1,8 @@
 #include <stdio.h>
 
 typedef struct Cache_Block {
+	sem_t mutex, w;
+	int readers;
 	int size;
 	int timestamp;
 	char URN[MAXLINE];
@@ -11,6 +13,7 @@ typedef struct Cache_Block {
 } Cache_Block;
 
 typedef struct Cache {
+	sem_t mutex;
 	int max_size;
 	int available_size;
 	Cache_Block *root;
