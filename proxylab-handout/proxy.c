@@ -1,11 +1,14 @@
 /*
        Name: Ken Ling
   Andrew ID: kling1
+
+  A web proxy with approximate LRU cache.
 */
 #include <stdio.h>
 #include <regex.h>
 #include <string.h>
 #include "csapp.h"
+#include "cache.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -31,6 +34,7 @@ regex_t reg_port;
 regex_t reg_urn;
 const int nmatch = 10;
 
+Cache *cache;
 void process_request(int fd);
 void read_requesthdrs(rio_t *rp, char request[MAXBUF], char host[MAXLINE], char port[MAXLINE]);
 void clienterror(int fd, char *cause, char *errnum, 
@@ -43,6 +47,10 @@ void *thread(void *vargp);
 
 int main(int argc, char **argv)
 {
+    cache = malloc(sizeof(Cache));
+    memset(cache, 0, sizeof(Cache));
+    initialize_cache(cache, MAX_CACHE_SIZE);
+
     int listenfd, *client_connfd;
     char hostname[MAXLINE], port[MAXLINE];
     socklen_t clientlen;
@@ -127,9 +135,6 @@ void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char p
         // printf("%s\n", body);
         Rio_writen(client_fd, body, n);
     }
-    // Rio_readlineb(&rio, body, MAXBUF);
-    // printf("CONTENT:\n%s\n", body);
-    // Fputs(body, stdout);
 }
 
 int parse_uri(char uri[MAXLINE], char urn[MAXLINE]) {
