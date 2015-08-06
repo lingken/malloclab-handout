@@ -8,7 +8,7 @@
 #include <time.h>
 #include <limits.h>
 #include "cache.h"
-
+#include "csapp.h"
 /* Operations for linked list */
 /*
     Find the element in linked list according to URN and Host.
@@ -49,7 +49,8 @@ void initialize_cache_block(Cache_Block *cache_block, int size, char *response, 
     strncpy(cache_block->URN, URN, MAXLINE);
     strncpy(cache_block->Host, Host, MAXLINE);
     refresh(cache_block);
-    char *content = calloc(size);
+    char *content = malloc(size);
+    memset(content, 0, size);
     memcpy(content, response, size);
     cache_block->response = content;
 }
@@ -70,14 +71,15 @@ void free_cache_block(Cache_Block *cache_block) {
 }
 
 /* Initialize the parameters of a cache */
-void initialize_cache(Cache *cache, maxsize) {
+void initialize_cache(Cache *cache, int maxsize) {
     sem_init(&cache->mutex, 0, 1);
     sem_init(&cache->w, 0, 1);
     cache->readers = 0;
 
     cache->max_size = maxsize;
     cache->available_size = maxsize;
-    cache->root = calloc(sizeof(Cache_Block));
+    cache->root = malloc(sizeof(Cache_Block));
+    memset(cache->root, 0, sizeof(Cache_Block));
 }
 /*
     Return the least recent used block.
@@ -112,7 +114,8 @@ char *read_from_cache(Cache *cache, char *URN, char *Host) {
     char *response = NULL;
     Cache_Block *ptr = find_elem(cache->root, URN, Host);
     if (ptr) { // the content is cached
-        response = calloc(ptr->size);
+        response = malloc(ptr->size);
+        memset(response, 0, ptr->size);
         // response = ptr->response;
         memcpy(response, ptr->response, ptr->size);
         refresh(ptr);
@@ -144,7 +147,8 @@ void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Hos
         cache->available_size += old_block->size;
         free_cache_block(old_block);
     }
-    Cache_Block *new_block = calloc(sizeof(Cache_Block));
+    Cache_Block *new_block = malloc(sizeof(Cache_Block));
+    memset(new_block, 0, sizeof(Cache_Block));
     initialize_cache_block(new_block, size, response, URN, Host);
     add_elem(cache->root, new_block);
     cache->available_size -= size;
@@ -156,7 +160,7 @@ void free_cache(Cache *cache) {
     if (cache) {
         if (cache->root) {
             while (cache->root->next) {
-                Cache_Block *ptr = delete_elem(cache->root, cache->root->next);
+                Cache_Block *ptr = delete_elem(cache->root->next);
                 free_cache_block(ptr);
             }
             free(cache->root);
