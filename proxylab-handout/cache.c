@@ -140,7 +140,7 @@ void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Hos
     if (size > cache->max_size) { // Content is too large to be cached
         return;
     }
-    while (size < cache->available_size) {
+    while (size > cache->available_size) {
         // Replace some old cache blocks
         Cache_Block *old_block = find_least_recent_used(cache);
         old_block = delete_elem(old_block);

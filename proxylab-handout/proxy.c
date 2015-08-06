@@ -39,7 +39,8 @@ void process_request(int fd);
 void read_requesthdrs(rio_t *rp, char request[MAXBUF], char host[MAXLINE], char port[MAXLINE]);
 void clienterror(int fd, char *cause, char *errnum, 
          char *shortmsg, char *longmsg);
-void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE]);
+void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]);
+int parse_uri(char uri[MAXLINE], char urn[MAXLINE]);
 // int parse_uri(char uri[MAXLINE], char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]);
 void initialize_regex();
 void free_regex();
@@ -89,7 +90,7 @@ void *thread(void *vargp) {
 
 void process_request(int client_fd) 
 {
-    int server_fd;
+    // int server_fd;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char host[MAXLINE], port[MAXLINE], urn[MAXLINE];
     char request[MAXBUF];
@@ -115,11 +116,18 @@ void process_request(int client_fd)
     printf("FINAL:\n");
     printf("%s\n", request);
 
-    get_content(request, client_fd, host, port);
+    get_content(request, client_fd, host, port, urn);
 }
 
-void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE]) {
+void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char port[MAXLINE], char urn[MAXLINE]) {
     printf("THIS IS REQUEST:\n%s", request);
+    char *response = read_from_cache(cache, urn, host);
+    if (response) { // Cache Hit
+        Rio_writen(client_fd, response, strlen(response));
+        free(response);
+        return;
+    }
+
     int server_fd;
     rio_t rio;
     printf("MY HOST: %s\n", host);
@@ -130,10 +138,18 @@ void get_content(char request[MAXBUF], int client_fd, char host[MAXLINE], char p
     Rio_writen(server_fd, request, strlen(request));
 
     char body[MAXLINE];
+    char buffer[MAX_OBJECT_SIZE];
+    int content_size = 0;
     int n = 0;
     while ((n = Rio_readlineb(&rio, body, MAXLINE)) != 0) {
-        // printf("%s\n", body);
+        if (content_size + n < MAX_OBJECT_SIZE) {
+            memcpy(buffer + content_size, body, n);
+        }
+        content_size += n;
         Rio_writen(client_fd, body, n);
+    }
+    if (content_size < MAX_OBJECT_SIZE) {
+        write_to_cache(cache, content_size, buffer, urn, host);
     }
 }
 
