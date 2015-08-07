@@ -2,13 +2,14 @@
        Name: Ken Ling
   Andrew ID: kling1
 
-  A cache based on linked list for the web proxy.
+  A cache based on linked list with LRU eviction strategy for the web proxy.
 */
 #include <string.h>
 #include <time.h>
 #include <limits.h>
 #include "cache.h"
 #include "csapp.h"
+
 /* Operations for linked list */
 /*
     Find the element in linked list according to URN and Host.
@@ -43,7 +44,9 @@ Cache_Block *delete_elem(Cache_Block *elem) {
     return elem;
 }
 /* Initialize the parameters of a cache block */
-void initialize_cache_block(Cache_Block *cache_block, int size, char *response, char *URN, char *Host) {
+void initialize_cache_block(Cache_Block *cache_block, int size, 
+    char *response, char *URN, char *Host) {
+
     sem_init(&cache_block->mutex, 0, 1);
     cache_block->size = size;
     strncpy(cache_block->URN, URN, MAXLINE);
@@ -70,6 +73,7 @@ void free_cache_block(Cache_Block *cache_block) {
     }
 }
 
+/* API for using the cache */
 /* Initialize the parameters of a cache */
 void initialize_cache(Cache *cache, int maxsize) {
     sem_init(&cache->mutex, 0, 1);
@@ -100,7 +104,8 @@ Cache_Block *find_least_recent_used(Cache *cache) {
 }
 /* 
     Find and return a copy of content in cache according to URN and Host.
-    Return the copy will avoid race conditions. 
+    Support parallelism with Reader & Writer model.
+    Return the copy of content to avoid race conditions. 
     Return NULL if the content is not cached
 */
 char *read_from_cache(Cache *cache, char *URN, char *Host) {
@@ -134,7 +139,9 @@ char *read_from_cache(Cache *cache, char *URN, char *Host) {
     Replace least recent used blocks with the new one
     if space is not enough.
 */
-void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Host) {
+void write_to_cache(Cache *cache, int size, char *response, 
+    char *URN, char *Host) {
+    
     P(&cache->w);
 
     if (size > cache->max_size) { // Content is too large to be cached
