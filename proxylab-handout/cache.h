@@ -1,3 +1,9 @@
+/*
+       Name: Ken Ling
+  Andrew ID: kling1
+
+  A cache based on linked list with LRU eviction strategy for the web proxy.
+*/
 #include <stdio.h>
 #include "csapp.h"
 typedef struct Cache_Block Cache_Block;
@@ -20,16 +26,18 @@ struct Cache{
 	int available_size;
 	struct Cache_Block *root;
 };
-
-void initialize_cache_block(Cache_Block *cache_block, int size, char *response, char *URN, char *Host);
+/* Function prototypes for internal accessing cache block */
+void initialize_cache_block(Cache_Block *cache_block, int size, 
+	char *response, char *URN, char *Host);
 Cache_Block *find_elem(Cache_Block *root, char *URN, char *Host);
 void add_elem(Cache_Block *root, Cache_Block *elem);
 Cache_Block *delete_elem(Cache_Block *elem);
 void refresh(Cache_Block *cache_block);
 void free_cache_block(Cache_Block *cache_block);
-
+/* Function prototyptes of API for using the cache */
 void initialize_cache(Cache *cache, int maxsize);
 Cache_Block *find_least_recent_used(Cache *cache);
 char *read_from_cache(Cache *cache, char *URN, char *Host);
-void write_to_cache(Cache *cache, int size, char *response, char *URN, char *Host);
+void write_to_cache(Cache *cache, int size, char *response, char *URN, 
+	char *Host);
 void free_cache(Cache *cache);
