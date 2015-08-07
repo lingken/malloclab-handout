@@ -61,6 +61,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    Signal(SIGPIPE, SIG_IGN);
     initialize_regex();
     /* Initialize the global cache */
     cache = Malloc(sizeof(Cache));
